@@ -11,6 +11,8 @@ import re
 import subprocess
 import sys
 import threading
+import uuid
+from datetime import datetime
 import webbrowser
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
@@ -44,6 +46,53 @@ def project(name):
     if not re.fullmatch(r"[\w\-]+", name) or not (p / "score.json").exists():
         raise FileNotFoundError(name)
     return p
+
+
+class HttpError(Exception):
+    def __init__(self, code, msg):
+        super().__init__(msg)
+        self.code, self.msg = code, msg
+
+
+AI = "ai"   # AI 譜（score.json）的版本 id，唯讀
+
+
+def version_file(P, vid):
+    if vid == AI:
+        return P / "score.json"
+    f = P / "versions" / f"{vid}.json"
+    if not re.fullmatch(r"[0-9a-f]{8}", vid or "") or not f.exists():
+        raise FileNotFoundError(f"版本 {vid}")
+    return f
+
+
+def read_version(P, vid):
+    return json.loads(version_file(P, vid).read_text(encoding="utf-8"))
+
+
+def list_versions(P):
+    out = [{"id": AI, "name": "AI 譜", "kind": "ai", "source": None, "created": None}]
+    metas = []
+    for f in (P / "versions").glob("*.json"):
+        m = json.loads(f.read_text(encoding="utf-8")).get("meta", {})
+        metas.append({"id": f.stem, "name": m.get("name", f.stem), "kind": "edited",
+                      "source": m.get("source"), "created": m.get("created")})
+    out += sorted(metas, key=lambda v: (v["created"] or "", v["id"]))
+    return out
+
+
+def create_version(P, name, source):
+    name = (name or "").strip()
+    if not name:
+        raise HttpError(400, "版本名稱不能空白")
+    score = read_version(P, source)
+    score.pop("meta", None)
+    vid = uuid.uuid4().hex[:8]
+    meta = {"name": name, "source": source, "created": datetime.now().isoformat(timespec="seconds")}
+    (P / "versions").mkdir(exist_ok=True)
+    (P / "versions" / f"{vid}.json").write_text(
+        json.dumps({**score, "meta": meta}, ensure_ascii=False, indent=1), encoding="utf-8")
+    return {"id": vid, "name": name, "kind": "edited", "source": source, "created": meta["created"]}
 
 
 def bar_activations(P, score):
@@ -92,7 +141,7 @@ def normalize(score):
 
 
 def render_line_png(bars, first_no, highlight):
-    measures = [{"kind": "bar", "no": first_no + i, "ticks": b["ticks"],
+    measures = [{"kind": "bar", "no": first_no + k, "ticks": b["ticks"],
                  "events": [{**e, "idx": k * 1000 + j} for j, e in enumerate(b["events"])]}
                 for k, b in enumerate(bars)]
     img, _ = renderer.render_line(measures, show_header=False)
@@ -175,15 +224,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, names)
             if u.path == "/api/score":
                 P = project(q["p"])
-                score = json.loads((P / "score.json").read_text(encoding="utf-8"))
-                return self._send(200, {"score": score, "act": bar_activations(P, score),
-                                        "has_auto": (P / "score.auto.json").exists(),
+                vid = q.get("v", AI)
+                score = read_version(P, vid)
+                return self._send(200, {"score": score, "version": vid, "act": bar_activations(P, score),
                                         "media": [m for m in MEDIA if (P / m).exists()]})
+            if u.path == "/api/versions":
+                return self._send(200, list_versions(project(q["p"])))
             if u.path == "/api/auto_bar":
                 P = project(q["p"])
-                auto = P / "score.auto.json"
-                src = auto if auto.exists() else P / "score.json"
-                bars = json.loads(src.read_text(encoding="utf-8"))["bars"]
+                bars = json.loads((P / "score.json").read_text(encoding="utf-8"))["bars"]
                 return self._send(200, bars[int(q["i"])])
             if u.path == "/api/render_status":
                 r = renders.get(q["p"])
@@ -198,6 +247,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, {"error": "not found"})
         except FileNotFoundError as e:
             self._send(404, {"error": f"找不到 {e}"})
+        except HttpError as e:
+            self._send(e.code, {"error": e.msg})
 
     def do_POST(self):
         u = urlparse(self.path)
@@ -205,12 +256,18 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if u.path == "/api/score":
                 P = project(q["p"])
+                vid = q.get("v", AI)
+                if vid == AI:
+                    raise HttpError(403, "AI 譜是唯讀的，請先複製成編輯版本")
+                f = version_file(P, vid)
+                meta = json.loads(f.read_text(encoding="utf-8")).get("meta", {})
                 score = normalize(self._body())
-                auto = P / "score.auto.json"
-                if not auto.exists():   # 第一次存檔前保留 AI 自動扒譜的原始版本
-                    auto.write_text((P / "score.json").read_text(encoding="utf-8"), encoding="utf-8")
-                (P / "score.json").write_text(json.dumps(score, ensure_ascii=False, indent=1), encoding="utf-8")
+                score["meta"] = meta   # 中繼資料以伺服器端為準
+                f.write_text(json.dumps(score, ensure_ascii=False, indent=1), encoding="utf-8")
                 return self._send(200, {"ok": True, "edited": sum(1 for b in score["bars"] if b.get("edited"))})
+            if u.path == "/api/versions":
+                body = self._body()
+                return self._send(200, create_version(project(q["p"]), body.get("name"), body.get("source", AI)))
             if u.path == "/api/line":
                 body = self._body()
                 png = render_line_png(body["bars"], body["first_no"], body.get("highlight"))
@@ -242,6 +299,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, {"error": "not found"})
         except FileNotFoundError as e:
             self._send(404, {"error": f"找不到 {e}"})
+        except HttpError as e:
+            self._send(e.code, {"error": e.msg})
 
 
 def main():
