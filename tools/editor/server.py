@@ -1,7 +1,7 @@
 """逐小節鼓譜編輯器（本機伺服器）。
 
-啟動：.venv/Scripts/python.exe tools/editor/server.py [--port 8765]
-然後開 http://localhost:8765
+啟動：.venv/Scripts/python.exe tools/editor/server.py [--port 8765] [--projects-root DIR] [--open]
+只綁 127.0.0.1。然後開 http://127.0.0.1:8765（--open 會自動開瀏覽器）
 """
 import argparse
 import base64
@@ -11,6 +11,7 @@ import re
 import subprocess
 import sys
 import threading
+import webbrowser
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
@@ -31,13 +32,15 @@ ACT_CLASS = {"CR": "CY", "RD": "CY", "HH": "HH", "HO": "HH", "SD": "SD", "XS": "
              "TH": "TM", "TM": "TM", "TF": "TM", "BD": "BD", "HF": None}
 MEDIA = {"video.mp4": "video/mp4", "mix.wav": "audio/wav", "drums.wav": "audio/wav"}
 
+PROJECTS_ROOT = ROOT / "projects"   # 可由 --projects-root 覆寫
+
 renderer = LineRenderer(Layout(width=1920, height=280))
 act_cache = {}
 renders = {}   # name -> {"proc", "log"}
 
 
 def project(name):
-    p = ROOT / "projects" / name
+    p = PROJECTS_ROOT / name
     if not re.fullmatch(r"[\w\-]+", name) or not (p / "score.json").exists():
         raise FileNotFoundError(name)
     return p
@@ -168,7 +171,7 @@ class Handler(BaseHTTPRequestHandler):
             if u.path in ("/", "/index.html"):
                 return self._send(200, (HERE / "index.html").read_bytes(), "text/html; charset=utf-8")
             if u.path == "/api/projects":
-                names = sorted(p.parent.name for p in (ROOT / "projects").glob("*/score.json"))
+                names = sorted(p.parent.name for p in PROJECTS_ROOT.glob("*/score.json"))
                 return self._send(200, names)
             if u.path == "/api/score":
                 P = project(q["p"])
@@ -242,11 +245,19 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    global PROJECTS_ROOT
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--projects-root", type=Path, default=PROJECTS_ROOT, help="專案根目錄（預設 projects/）")
+    ap.add_argument("--open", action="store_true", help="啟動後自動開瀏覽器")
     a = ap.parse_args()
-    print(f"鼓譜編輯器：http://localhost:{a.port}", flush=True)
-    ThreadingHTTPServer(("127.0.0.1", a.port), Handler).serve_forever()
+    PROJECTS_ROOT = a.projects_root.resolve()
+    url = f"http://127.0.0.1:{a.port}"
+    srv = ThreadingHTTPServer(("127.0.0.1", a.port), Handler)
+    print(f"鼓譜編輯器：{url}（關閉此視窗即結束）", flush=True)
+    if a.open:
+        threading.Timer(0.5, webbrowser.open, args=(url,)).start()
+    srv.serve_forever()
 
 
 if __name__ == "__main__":
