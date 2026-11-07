@@ -1,4 +1,5 @@
-# torch 請依自己的環境安裝（見 README），這裡不鎖定
+# Install torch/torchaudio first (see README), they are not pinned here.
+# beat_this is installed from git (see README).
 numpy
 scipy
 pillow
@@ -8,4 +9,3 @@ soundfile
 imageio-ffmpeg
 yt-dlp
 demucs
-# beat_this 沒有穩定的 PyPI 版本，請用 README 的 git 指令安裝
