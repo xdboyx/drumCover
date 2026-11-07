@@ -67,6 +67,7 @@ main { padding: 14px 16px 40px; display: grid; gap: 14px; max-width: 1500px; mar
 #playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: #e11d48; pointer-events: none; display: none; }
 .tools { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
 .hint { color: var(--muted); font-size: 12px; }
+.verwarn { color: #8a5a00; background: #fff3d6; border: 1px solid #e8c36a; border-radius: 6px; padding: 2px 8px; font-size: 12px; }
 kbd { font: 11px Consolas, monospace; background: #f1eee9; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; }
 details summary { cursor: pointer; color: var(--muted); }
 #renderLog { font: 12px Consolas, monospace; color: var(--muted); white-space: pre-wrap; max-height: 3.2em; overflow: hidden; }
@@ -88,7 +89,9 @@ dialog .row { justify-content: flex-end; }
   <button id="verCopyBtn" title="從目前這份鼓譜複製出新的編輯版本">複製版本</button>
   <button id="verRenameBtn" title="幫編輯版本改名">改名</button>
   <button id="verDelBtn" title="刪除編輯版本">刪除</button>
+  <button id="reimportBtn" title="用目前的扒譜程式重新扒譜；上一份 AI 譜會保存成舊 AI 譜，編輯版本不受影響">重新扒譜</button>
   <span id="roHint" class="ro"></span>
+  <span id="verWarn" class="verwarn" hidden></span>
   <span class="grow"></span>
   <span id="saveState" class="saved">已儲存</span>
   <button id="undoBtn" title="復原 (Ctrl+Z)">↶ 復原</button>
@@ -252,7 +255,8 @@ async function refreshVersions(selectId) {
   versions = await api(`/api/versions?p=${encodeURIComponent(P)}`);
   $("ver").innerHTML = versions.map(v => {
     const gone = v.source_deleted;
-    return `<option value="${v.id}">${v.kind === "ai" ? "AI 譜（唯讀）" : esc(v.name)}${gone ? "（來源已刪除）" : ""}</option>`;
+    const label = v.kind === "ai" ? "AI 譜（唯讀）" : v.kind === "old_ai" ? esc(v.name) + "（唯讀）" : esc(v.name);
+    return `<option value="${v.id}">${label}${gone ? "（來源已刪除）" : ""}${v.warning ? " ⚠" : ""}</option>`;
   }).join("");
   $("ver").value = selectId;
 }
@@ -269,9 +273,12 @@ async function loadProject(name, vid = "ai", force = false) {
   const d = await api(`/api/score?p=${encodeURIComponent(name)}&v=${encodeURIComponent(vid)}`);
   P = name; V = vid; score = d.score;
   await refreshVersions(vid);
-  $("roHint").textContent = vid === "ai" ? "唯讀：點格子會先建立新版本" : "";
-  $("saveBtn").disabled = vid === "ai";
-  $("verRenameBtn").disabled = $("verDelBtn").disabled = vid === "ai";
+  $("roHint").textContent = isReadOnly() ? "唯讀：點格子會先建立新版本" : "";
+  $("saveBtn").disabled = isReadOnly();
+  $("verRenameBtn").disabled = $("verDelBtn").disabled = isReadOnly();
+  const w = (versions.find(v => v.id === vid) || {}).warning;
+  $("verWarn").hidden = !w;
+  $("verWarn").textContent = w ? "⚠ " + w.message + `（第 ${w.bars.map(i => i + 1).join("、")} 小節）` : "";
   act = d.act; undoStack = []; redoStack = []; setDirty(false);
   try { localStorage.setItem("dce.proj", name); } catch (e) {}
   $("vid").src = d.media.includes("video.mp4") ? `/media/${encodeURIComponent(P)}/video.mp4` : "";
@@ -282,6 +289,7 @@ async function loadProject(name, vid = "ai", force = false) {
   $("proj").dataset.last = name;
   renderAll();
 }
+const isReadOnly = () => { const v = versions.find(v => v.id === V); return V === "ai" || (!!v && v.kind === "old_ai"); };
 const bar = () => score.bars[cur];
 function isTripletBeat(b, j) {
   return (b.triplets || []).includes(j) || b.events.some(e => Math.floor(e.tick / TICKS) === j && e.tick % 3 !== 0);
@@ -301,7 +309,7 @@ function setDirty(v) {
 
 // 在 AI 譜上要改時，先命名並複製成編輯版本，再執行修改
 async function ensureEditable() {
-  if (V !== "ai") return true;
+  if (!isReadOnly()) return true;
   const cur0 = cur;
   $("nameInp").value = "";
   const r = await ask("nameDlg");
@@ -615,7 +623,7 @@ function redo() {
 $("undoBtn").onclick = undo;
 $("redoBtn").onclick = redo;
 async function save() {
-  if (V === "ai") return toast("AI 譜是唯讀的");
+  if (isReadOnly()) return toast("這份鼓譜是唯讀的");
   const d = await api(`/api/score?p=${encodeURIComponent(P)}&v=${V}`, score);
   const fresh = await api(`/api/score?p=${encodeURIComponent(P)}&v=${V}`);
   score = fresh.score;
@@ -755,7 +763,7 @@ $("vid").addEventListener("loadedmetadata", () => { if (!playing) $("vid").curre
 // ---------------------------------------------------------------- 輸出影片
 $("renderBtn").onclick = async () => {
   try {
-    if (dirty && V !== "ai") await save();
+    if (dirty && !isReadOnly()) await save();
     await api(`/api/render?p=${encodeURIComponent(P)}&v=${encodeURIComponent(V)}`, { crop_y: +$("cropSel").value, simile: $("simileChk").checked });
     pollJob();
   } catch (e) { toast("無法輸出：" + e.message); }
@@ -763,7 +771,7 @@ $("renderBtn").onclick = async () => {
 // ---------------------------------------------------------------- 輸出鼓譜圖檔
 async function exportSheet(format) {
   try {
-    if (dirty && V !== "ai") await save();
+    if (dirty && !isReadOnly()) await save();
     $("sheetState").textContent = "輸出中…";
     const r = await api(`/api/export_sheet?p=${encodeURIComponent(P)}`, { version: V, format, simile: $("simileChk").checked });
     $("sheetState").textContent = `完成：exports/${r.files[0]}${r.files.length > 1 ? ` 等 ${r.files.length} 張` : ""}（共 ${r.pages} 頁）`;
@@ -773,20 +781,32 @@ $("sheetPdfBtn").onclick = () => exportSheet("pdf");
 $("sheetPngBtn").onclick = () => exportSheet("png");
 $("openExportsBtn").onclick = () => api(`/api/open_exports?p=${encodeURIComponent(P)}`, {}).catch(e => toast("無法開啟：" + e.message));
 
+$("reimportBtn").onclick = async () => {
+  try {
+    if (!(await confirmLeave())) return;
+    if (!confirm("重新扒譜會把目前的 AI 譜保存成唯讀的舊 AI 譜，你的編輯版本不會改變。確定要開始嗎？")) return;
+    await api(`/api/projects/reimport?p=${encodeURIComponent(P)}`, {});
+    pollJob();
+  } catch (e) { toast("無法重新扒譜：" + e.message); }
+};
+
 // 工作狀態在伺服器端；重開分頁時也會從這裡接回進度
-let jobTimer = null;
+let jobTimer = null, lastKind = null, lastState = null;
 async function pollJob() {
   clearTimeout(jobTimer);
   const s = await api("/api/job");
   const busy = s.state === "running";
   $("renderBtn").disabled = busy;
+  $("reimportBtn").disabled = busy;
+  if (lastKind === "reimport" && lastState === "running" && !busy && s.state === "done" && P) { if (dirty) refreshVersions(V); else loadProject(P, V, true); }
+  lastKind = s.kind; lastState = s.state;
   $("renderBtn").title = busy ? "有工作正在執行，請等它結束" : "";
   if (busy) {
     const pct = Math.round((s.progress || 0) * 100);
-    $("renderState").textContent = `${s.kind === "render" ? "輸出中" : "執行中"}（${s.project}）${s.step || ""} ${pct}%`;
+    $("renderState").textContent = `${s.kind === "render" ? "輸出中" : s.kind === "reimport" ? "重新扒譜中" : "執行中"}（${s.project}）${s.step || ""} ${pct}%`;
     jobTimer = setTimeout(pollJob, 1000);
   } else {
-    $("renderState").textContent = s.state === "done" ? `完成：projects/${s.project}/${s.output}` : (s.state === "error" ? "輸出失敗" : "");
+    $("renderState").textContent = s.state === "done" ? (s.output ? `完成：projects/${s.project}/${s.output}` : "完成") : (s.state === "error" ? (s.kind === "reimport" ? "重新扒譜失敗" : "輸出失敗") : "");
     $("renderLog").textContent = s.state === "error" ? s.error : "";
   }
 }

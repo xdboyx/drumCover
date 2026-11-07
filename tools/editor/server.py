@@ -164,6 +164,66 @@ def retry_project(name):
     return submit_import(P, d["source"], d["opts"], st["failed_step"] if failed_here else 0)
 
 
+def bars_misaligned(old_bars, new_bars):
+    """逐小節比對 t0，差超過 DIFF_SEC 的小節編號（0 起算）；一邊沒有對應小節的也算。"""
+    out = []
+    for i in range(max(len(old_bars), len(new_bars))):
+        if i >= len(old_bars) or i >= len(new_bars) or abs(old_bars[i]["t0"] - new_bars[i]["t0"]) > DIFF_SEC:
+            out.append(i)
+    return out
+
+
+def reimport_steps(P, opts):
+    """重新扒譜：保存舊 AI 譜 → 扒譜 → 排版 → 比對新舊 AI 譜。失敗時 AI 譜沒變就不留下多餘的舊 AI 譜。"""
+    pl = pipeline()
+    st = {}
+
+    def snapshot(report):
+        now = datetime.now()
+        vid = uuid.uuid4().hex[:8]
+        data = json.loads((P / "score.json").read_text(encoding="utf-8"))
+        data["meta"] = {"name": f"舊 AI 譜（{now:%Y-%m-%d %H:%M:%S}）", "kind": OLD_AI, "source": None,
+                        "created": now.isoformat(timespec="seconds")}
+        (P / "versions").mkdir(exist_ok=True)
+        f = P / "versions" / f"{vid}.json"
+        f.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+        st.update(id=vid, file=f, before=(P / "score.json").read_bytes())
+
+    def guard(fn):
+        def run(report):
+            try:
+                fn(report)
+            except BaseException:
+                if (P / "score.json").read_bytes() == st["before"]:
+                    st["file"].unlink(missing_ok=True)
+                raise
+        return run
+
+    def compare(report):
+        f = st["file"]
+        old = json.loads(f.read_text(encoding="utf-8"))
+        new = json.loads((P / "score.json").read_text(encoding="utf-8"))
+        old["meta"]["diff_bars"] = bars_misaligned(old["bars"], new["bars"])
+        old["meta"]["replaced_at"] = datetime.now().isoformat(timespec="seconds")
+        f.write_text(json.dumps(old, ensure_ascii=False, indent=1), encoding="utf-8")
+
+    return [("保存舊 AI 譜", snapshot),
+            ("扒譜", guard(lambda report: pl.transcribe(P, opts, report))),
+            ("排版", guard(lambda report: pl.score(P, opts, report))),
+            ("比對", compare)]
+
+
+def reimport_project(name):
+    P = project(name)   # 沒有 AI 譜的專案（還沒扒完）不能重新扒譜
+    f = P / "import.json"
+    opts = json.loads(f.read_text(encoding="utf-8")).get("opts", {}) if f.exists() else {}
+    try:
+        runner.submit("reimport", P.name, reimport_steps(P, opts))
+    except Busy as e:
+        return 409, {"error": str(e), "busy": True, "job": e.status}
+    return 200, {"ok": True, "name": P.name}
+
+
 def project_list():
     st = runner.status()
     out = []
@@ -196,27 +256,59 @@ def read_version(P, vid):
     return json.loads(version_file(P, vid).read_text(encoding="utf-8"))
 
 
+OLD_AI = "old_ai"   # 舊 AI 譜（versions/ 裡 meta.kind == "old_ai"），唯讀
+DIFF_SEC = 0.1      # 新舊 AI 譜小節起點差超過這個秒數就算對不齊
+
+
 def list_versions(P):
     out = [{"id": AI, "name": "AI 譜", "kind": "ai", "source": None, "created": None}]
-    metas = []
+    metas, olds = [], []
     for f in (P / "versions").glob("*.json"):
         m = json.loads(f.read_text(encoding="utf-8")).get("meta", {})
-        metas.append({"id": f.stem, "name": m.get("name", f.stem), "kind": "edited",
+        kind = OLD_AI if m.get("kind") == OLD_AI else "edited"
+        metas.append({"id": f.stem, "name": m.get("name", f.stem), "kind": kind,
                       "source": m.get("source"), "created": m.get("created")})
+        if kind == OLD_AI:
+            olds.append((m.get("replaced_at") or "", f.stem, m.get("diff_bars") or []))
     out += sorted(metas, key=lambda v: (v["created"] or "", v["id"]))
-    ids = {v["id"] for v in out}
+    ids = {v["id"]: v for v in out}
     for v in out:
         v["source_deleted"] = bool(v["source"]) and v["source"] not in ids
+    olds.sort()
+    diffs = {oid: bars for _, oid, bars in olds}
+    for v in out:
+        if v["kind"] == "edited":
+            oid = derived_old_ai(v, ids, olds)
+            if oid and diffs[oid]:
+                v["warning"] = {"old_ai": oid, "bars": diffs[oid],
+                                "message": f"新的 AI 譜有 {len(diffs[oid])} 個小節的起點跟這個版本根據的舊 AI 譜差超過 {DIFF_SEC} 秒，可能跟影片對不齊"}
     return out
 
 
-def require_editable(vid):
+def derived_old_ai(v, by_id, olds):
+    """這個編輯版本是從哪一份舊 AI 譜衍生的（沿來源鏈往上找）。
+    來源是「AI 譜」的版本，指的是它建立當時的 AI 譜，也就是在它之後第一個被取代下來的舊 AI 譜。"""
+    seen = set()
+    while v and v["id"] not in seen:
+        seen.add(v["id"])
+        src = v["source"]
+        if src == AI:
+            return next((oid for rep, oid, _ in olds if rep and (v["created"] or "") <= rep), None)
+        if src in by_id and by_id[src]["kind"] == OLD_AI:
+            return src
+        v = by_id.get(src)
+    return None
+
+
+def require_editable(P, vid):
     if vid == AI:
-        raise HttpError(403, "AI 譜不能改名或刪除")
+        raise HttpError(403, "AI 譜不能存檔、改名或刪除")
+    if read_version(P, vid).get("meta", {}).get("kind") == OLD_AI:
+        raise HttpError(403, "舊 AI 譜是唯讀的，不能存檔、改名或刪除；可以從它複製新版本")
 
 
 def rename_version(P, vid, name):
-    require_editable(vid)
+    require_editable(P, vid)
     name = (name or "").strip()
     if not name:
         raise HttpError(400, "版本名稱不能空白")
@@ -228,7 +320,7 @@ def rename_version(P, vid, name):
 
 
 def delete_version(P, vid):
-    require_editable(vid)
+    require_editable(P, vid)
     version_file(P, vid).unlink()
 
 
@@ -458,6 +550,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if u.path == "/api/projects/new":
                 return self._send(*new_project(self._body()))
+            if u.path == "/api/projects/reimport":
+                return self._send(*reimport_project(q.get("p")))
             if u.path == "/api/projects/retry":
                 return self._send(*retry_project(q.get("p")))
             if u.path == "/api/score":
@@ -465,6 +559,7 @@ class Handler(BaseHTTPRequestHandler):
                 vid = q.get("v", AI)
                 if vid == AI:
                     raise HttpError(403, "AI 譜是唯讀的，請先複製成編輯版本")
+                require_editable(P, vid)
                 f = version_file(P, vid)
                 meta = json.loads(f.read_text(encoding="utf-8")).get("meta", {})
                 score = normalize(self._body())
