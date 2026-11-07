@@ -5,13 +5,6 @@ __pycache__/
 .claude/settings.local.json
 .archify/
 
-# 專案產物：影片、音訊、中間檔（體積大、且有版權疑慮，不進版控）
-projects/**/*.mp4
-projects/**/*.wav
-projects/**/*.m4a
-projects/**/*.mp3
-projects/**/*.webm
-projects/**/*.npy
-projects/**/*.png
-projects/**/demucs/
+# 各歌曲的專案資料（影片、音訊、譜、中間檔）全部不進版控
+projects/
 desktop.ini

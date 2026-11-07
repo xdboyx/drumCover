@@ -110,7 +110,7 @@ python -m venv .venv
 - `tools/notation.py`：鼓譜排版器
 - `tools/evaluate.py`、`tools/gt_tools.py`：拿附有鼓譜的影片驗證準確度
 - `tools/editor/`：逐小節編輯器（草稿，未測試）
-- `projects/`：每首歌的 `score.json`、`beats.json`（影片、音訊等大檔不納入版控）
+- `projects/`：每首歌的中間檔與成品（影片、音訊、`score.json` 等，執行時自動建立，不納入版控）
 - `third_party/ADTOF-pytorch`：扒鼓模型（git submodule）
 - `.claude/skills/`：給 Claude Code 用的流程說明
 - `docs/future-ideas.md`：未來想法
