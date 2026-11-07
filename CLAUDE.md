@@ -7,7 +7,13 @@
 - `tools/drumcover.py`：主流程 CLI（`download / analyze / score / render / all`）
 - `tools/notation.py`：鼓譜排版器（PIL 手繪，雙聲部日系鼓譜慣例）
 - `tools/evaluate.py`、`tools/gt_tools.py`：拿附有鼓譜的影片驗證扒譜準確度
-- `tools/editor/`：本機網頁操作介面的草稿（扒譜、預覽、編輯版本、輸出；**規劃已定案、尚未實作**，見 `docs/future-ideas.md` 第 1 節）
+- `tools/editor/`：本機網頁操作介面（扒譜、預覽、編輯版本、輸出；第一版已實作，規劃脈絡見 `docs/future-ideas.md` 第 1 節）
+  - `server.py`：HTTP 伺服器（只接受本機 Host／Origin）、專案與版本 API
+  - `jobs.py`：長時間工作執行器（同時只跑一個、可從失敗步驟重試）；`pipeline.py`：扒譜流程（呼叫 drumcover.py 子行程）
+  - `render_job.py`：輸出練習影片；`sheet_export.py`：輸出鼓譜圖檔（PDF／PNG）
+  - `home.html`：首頁（專案清單、新增專案）；`index.html`：編輯畫面
+- `tests/`：編輯器的 HTTP 測試（`.venv/Scripts/python.exe -m pytest tests`），以子行程啟動伺服器，扒譜流程用假的 pipeline 取代
+- `啟動操作介面.bat`：雙擊啟動編輯器伺服器並開瀏覽器
 - `projects/<name>/`：每首歌的中間檔與成品（video.mp4、score.json、out.mp4…）
 - `third_party/ADTOF-pytorch/`：扒鼓模型
 - 一律使用專案 venv：`.venv/Scripts/python.exe`

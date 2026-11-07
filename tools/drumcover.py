@@ -12,6 +12,8 @@
 import argparse
 import json
 import math
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -19,6 +21,7 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
+PROJECTS = ROOT / "projects"   # 可由 --projects-root 覆寫
 sys.stdout.reconfigure(encoding="utf-8")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -29,7 +32,7 @@ def ffmpeg_exe():
 
 
 def proj(name):
-    p = ROOT / "projects" / name
+    p = PROJECTS / name
     p.mkdir(parents=True, exist_ok=True)
     return p
 
@@ -42,10 +45,29 @@ def run(cmd):
 # ---------------------------------------------------------------- download
 def cmd_download(a):
     P = proj(a.name)
+    if Path(a.url).is_file():   # 本機 mp4：直接複製成 video.mp4
+        shutil.copyfile(a.url, P / "video.mp4")
+    else:
+        download_url(P, a.url)
+    if a.cmd == "download" and (a.start or a.dur):   # 只在單獨下載時裁切；all 的 start/dur 是 render 用的
+        trim_video(P, a.start, a.dur)
+    extract_audio(P)
+
+
+def trim_video(P, start, dur):
+    """裁掉片頭片尾（重新編碼以便精準到秒），之後所有步驟都以裁切後的影片為準。"""
+    tmp = P / "video.trim.mp4"
+    cmd = [ffmpeg_exe(), "-y", "-loglevel", "error", "-ss", f"{start}"]
+    if dur:
+        cmd += ["-t", f"{dur}"]
+    run(cmd + ["-i", P / "video.mp4", "-c:v", "libx264", "-crf", "18", "-c:a", "aac", tmp])
+    tmp.replace(P / "video.mp4")
+
+
+def download_url(P, url):
     run([sys.executable, "-m", "yt_dlp", "-f", "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080]",
          "--merge-output-format", "mp4", "--no-progress", "--ffmpeg-location", ffmpeg_exe(),
-         "-o", P / "video.mp4", "--no-playlist", a.url])
-    extract_audio(P)
+         "-o", P / "video.mp4", "--no-playlist", url])
 
 
 def extract_audio(P):
@@ -55,35 +77,46 @@ def extract_audio(P):
 
 # ---------------------------------------------------------------- analyze
 def cmd_analyze(a):
-    P = proj(a.name)
+    separate_drums(proj(a.name))
+    transcribe_activations(proj(a.name))
+    print("analyze done")
+
+
+def _device():
+    return "cuda" if __import__("torch").cuda.is_available() else "cpu"
+
+
+def separate_drums(P):
+    """1) Demucs 分離鼓聲 -> drums.wav（已存在就跳過）。"""
     if not (P / "mix.wav").exists():
         extract_audio(P)
-    device = "cuda" if __import__("torch").cuda.is_available() else "cpu"
-
-    # 1) Demucs 分離鼓聲
+    device = _device()
     if not (P / "drums.wav").exists():
         run([sys.executable, "-m", "demucs", "--two-stems", "drums", "-n", "htdemucs_ft", "-d", device,
              "-o", P / "demucs", P / "mix.wav"])
         src = next((P / "demucs").glob("*/mix/drums.wav"))
         src.replace(P / "drums.wav")
 
+
+def transcribe_activations(P, force=False):
+    """force=True 時忽略已存在的 act_*.npy / beats.json 重新計算（算完才覆蓋，失敗不會留下半成品）。"""
+    device = _device()
     # 2) ADTOF 逐幀擊打機率（100fps，5 類 BD/SD/TT/HH/CY）。鼓聲音軌與完整混音各跑一次：
     #    ADTOF 是用完整混音訓練的，分離後的音軌會讓輕的 hi-hat 變弱，兩者互補。
     from adtof_pytorch import transcribe_to_midi
     for src in ("drums", "mix"):
         out = P / f"act_{src}.npy"
-        if not out.exists():
+        if force or not out.exists():
             act = transcribe_to_midi(str(P / f"{src}.wav"), str(P / "tmp.mid"), device=device,
                                      return_activations=True)
             np.save(out, act[0])
 
     # 3) 拍點 / 小節線（用完整混音，節奏資訊最完整）
-    if not (P / "beats.json").exists():
+    if force or not (P / "beats.json").exists():
         from beat_this.inference import File2Beats
         beats, downbeats = File2Beats(checkpoint_path="final0", device=device, dbn=False)(str(P / "mix.wav"))
         (P / "beats.json").write_text(json.dumps({"beats": list(map(float, beats)),
                                                   "downbeats": list(map(float, downbeats))}))
-    print("analyze done")
 
 
 # ---------------------------------------------------------------- score
@@ -534,7 +567,7 @@ def video_fps(path):
 def cmd_render(a):
     from notation import LineRenderer, Layout, render_cursor
     P = proj(a.name)
-    score = json.loads((P / "score.json").read_text(encoding="utf-8"))
+    score = json.loads(Path(a.score or P / "score.json").read_text(encoding="utf-8"))
     W, H = 1920, 1080
     strip_h = a.strip_h
     top_h = H - strip_h
@@ -577,6 +610,8 @@ def cmd_render(a):
         if cur is not None and t >= t0 - 0.01:
             render_cursor(frame, cur, layout=L)
         proc.stdin.write(frame.tobytes())
+        if f % 10 == 0:
+            print(f"PROGRESS {f}/{n_frames}", flush=True)
     proc.stdin.close()
     proc.wait()
     print("render ->", out)
@@ -585,23 +620,33 @@ def cmd_render(a):
 # ---------------------------------------------------------------- main
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["download", "analyze", "score", "render", "all"])
+    ap.add_argument("cmd", choices=["download", "analyze", "separate", "transcribe", "score", "render", "all"])
     ap.add_argument("name")
     ap.add_argument("--url")
     ap.add_argument("--start", type=float, default=0)
     ap.add_argument("--dur", type=float, default=0)
-    ap.add_argument("--out")
+    ap.add_argument("--out", help="輸出路徑（相對路徑以專案資料夾為基準，也可給絕對路徑）")
+    ap.add_argument("--score", help="render 讀這份鼓譜檔（預設專案的 score.json）")
+    ap.add_argument("--projects-root", type=Path, help="專案根目錄（預設 projects/）")
     ap.add_argument("--strip-h", type=int, default=280)
     ap.add_argument("--crop-y", type=float, default=0.5, help="畫面上下裁切位置 0=保留頂部 1=保留底部")
     ap.add_argument("--lead", type=float, default=0.0, help="游標提早量（秒）")
-    ap.add_argument("--codec", default="h264_nvenc")
+    ap.add_argument("--codec", default=os.environ.get("DRUMCOVER_CODEC", "h264_nvenc"))
+    ap.add_argument("--force", action="store_true", help="transcribe：已有的機率與拍點檔也重做")
     ap.add_argument("--no-simile", action="store_true", help="不使用 % 反覆記號，每小節都寫出來")
     ap.add_argument("--source", default="hybrid", choices=["drums", "mix", "max", "hybrid"], help="ADTOF 機率來源")
     a = ap.parse_args()
+    if a.projects_root:
+        global PROJECTS
+        PROJECTS = a.projects_root.resolve()
     if a.cmd in ("download", "all"):
         cmd_download(a)
     if a.cmd in ("analyze", "all"):
         cmd_analyze(a)
+    if a.cmd == "separate":
+        separate_drums(proj(a.name))
+    if a.cmd == "transcribe":
+        transcribe_activations(proj(a.name), force=a.force)
     if a.cmd in ("score", "all"):
         cmd_score(a)
     if a.cmd in ("render", "all"):

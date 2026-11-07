@@ -366,3 +366,48 @@ def render_cursor(strip, x, color=(110, 185, 255), layout=None):
     for c in range(3):
         region[..., c] = region[..., c] * color[c] // 255
     strip[y0:y1, x0:x1] = region.astype("uint8")
+
+
+# ---------------------------------------------------------------- 整頁排版（A4 直式，供 PDF / PNG 輸出）
+A4_PX = (1240, 1754)             # A4 直式 150 dpi
+CJK_FONTS = [r"C:\Windows\Fonts\msjh.ttc", r"C:\Windows\Fonts\msjhbd.ttc", r"C:\Windows\Fonts\mingliu.ttc",
+             r"C:\Windows\Fonts\kaiu.ttf"]
+
+
+def _cjk_font(size):
+    for f in CJK_FONTS:
+        try:
+            return ImageFont.truetype(f, size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
+
+
+def render_sheet(measures, title, version_name, bpm, page_px=A4_PX, per_line=4):
+    """把一整份鼓譜排成多頁 A4 直式。measures 同 render_line（每項 kind=bar/repeat/multirest）。
+    每行 4 小節；第一頁上方有歌名、版本名稱與 BPM。回傳 PIL.Image 的 list（每頁一張）。"""
+    pw, ph = page_px
+    margin_top, margin_bottom = 100, 90
+    line_h = 200
+    lay = Layout(width=pw, height=line_h, sp=15, margin_l=60, margin_r=60, bars_per_line=per_line)
+    r = LineRenderer(lay)
+    lines = [measures[i:i + per_line] for i in range(0, len(measures), per_line)] or [[]]
+
+    f_title, f_sub = _cjk_font(46), _cjk_font(26)
+    title_h = 150
+    pages, y, d, page = [], 0, None, None
+    for li, ms in enumerate(lines):
+        if page is None or y + line_h > ph - margin_bottom:
+            page = Image.new("RGB", (pw, ph), (255, 255, 255))
+            pages.append(page)
+            d = ImageDraw.Draw(page)
+            y = margin_top
+            if len(pages) == 1:
+                d.text((lay.margin_l, y), title, font=f_title, fill=BLACK)
+                d.text((lay.margin_l, y + 66), f"{version_name}    BPM {int(round(bpm))}", font=f_sub, fill=BLACK)
+                y += title_h
+        img, _ = r.render_line(ms, show_header=li == 0, is_last_line=li == len(lines) - 1,
+                               tempo=None)
+        page.paste(img, (0, y))
+        y += line_h
+    return pages

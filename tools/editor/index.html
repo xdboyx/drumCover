@@ -42,6 +42,7 @@ main { padding: 14px 16px 40px; display: grid; gap: 14px; max-width: 1500px; mar
 .legend .l-u1::before { background: var(--warn-soft); } .legend .l-u2::before { background: #f9c98a; }
 .legend .l-ed::before { border: 2px solid var(--ok); } .legend .l-rest::before { background: #eeebe6; }
 #lineWrap { position: relative; }
+#lineCursor { position: absolute; background: rgb(110,185,255); mix-blend-mode: multiply; pointer-events: none; display: none; }
 #lineImg { width: 100%; display: block; border-radius: 6px; cursor: pointer; background: #fff; min-height: 60px; }
 .top { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 14px; align-items: start; }
 @media (max-width: 1100px) { .top { grid-template-columns: 1fr; } }
@@ -66,17 +67,31 @@ main { padding: 14px 16px 40px; display: grid; gap: 14px; max-width: 1500px; mar
 #playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: #e11d48; pointer-events: none; display: none; }
 .tools { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
 .hint { color: var(--muted); font-size: 12px; }
+.verwarn { color: #8a5a00; background: #fff3d6; border: 1px solid #e8c36a; border-radius: 6px; padding: 2px 8px; font-size: 12px; }
 kbd { font: 11px Consolas, monospace; background: #f1eee9; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; }
 details summary { cursor: pointer; color: var(--muted); }
 #renderLog { font: 12px Consolas, monospace; color: var(--muted); white-space: pre-wrap; max-height: 3.2em; overflow: hidden; }
+dialog { border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; max-width: 420px; }
+dialog::backdrop { background: rgba(0,0,0,.35); }
+dialog h3 { margin: 0 0 8px; font-size: 16px; }
+dialog input[type=text] { width: 100%; font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; margin: 8px 0 12px; }
+dialog .row { justify-content: flex-end; }
+.ro { color: var(--warn); font-size: 12px; }
 #toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: #1d1b18; color: #fff; padding: 8px 16px; border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 10; }
 #toast.show { opacity: .92; }
 </style>
 </head>
 <body>
 <header>
-  <h1>🥁 鼓譜編輯器</h1>
+  <h1><a href="/" style="color:inherit;text-decoration:none" title="回到專案清單">🥁 鼓譜編輯器</a></h1>
   <select id="proj"></select>
+  <select id="ver" title="版本"></select>
+  <button id="verCopyBtn" title="從目前這份鼓譜複製出新的編輯版本">複製版本</button>
+  <button id="verRenameBtn" title="幫編輯版本改名">改名</button>
+  <button id="verDelBtn" title="刪除編輯版本">刪除</button>
+  <button id="reimportBtn" title="用目前的扒譜程式重新扒譜；上一份 AI 譜會保存成舊 AI 譜，編輯版本不受影響">重新扒譜</button>
+  <span id="roHint" class="ro"></span>
+  <span id="verWarn" class="verwarn" hidden></span>
   <span class="grow"></span>
   <span id="saveState" class="saved">已儲存</span>
   <button id="undoBtn" title="復原 (Ctrl+Z)">↶ 復原</button>
@@ -103,7 +118,7 @@ details summary { cursor: pointer; color: var(--muted); }
         <span class="grow"></span>
         <span class="hint" id="barTime"></span>
       </div>
-      <div id="lineWrap" style="margin-top:10px"><img id="lineImg" alt="譜面預覽" title="點譜面上的小節可直接跳過去"></div>
+      <div id="lineWrap" style="margin-top:10px"><img id="lineImg" alt="譜面預覽" title="點譜面上的小節可直接跳過去"><div id="lineCursor"></div></div>
 
       <div id="gridWrap" style="margin-top:6px"><div id="grid"></div></div>
 
@@ -112,13 +127,13 @@ details summary { cursor: pointer; color: var(--muted); }
         <button id="copyBtn" title="Ctrl+C">複製</button>
         <button id="pasteBtn" title="Ctrl+V">貼上</button>
         <button id="clearBtn">清空</button>
-        <button id="revertBtn" title="回到 AI 自動扒譜的結果">還原為 AI 版本</button>
+        <button id="revertBtn" title="回到來源版本的內容（來源已刪除則回到 AI 譜）">還原成來源版本</button>
       </div>
     </section>
 
     <section class="card">
       <h2>試聽與比對</h2>
-      <video id="vid" playsinline preload="auto"></video>
+      <video id="vid" playsinline preload="auto" controls></video>
       <audio id="aud" preload="auto"></audio>
       <div class="row" style="margin-top:10px">
         <button id="playBtn" class="primary" title="空白鍵">▶ 播放這一小節</button>
@@ -148,6 +163,14 @@ details summary { cursor: pointer; color: var(--muted); }
         <span class="hint" id="renderState"></span>
       </div>
       <div id="renderLog"></div>
+
+      <h2 style="margin-top:16px">輸出鼓譜圖檔</h2>
+      <div class="row">
+        <button id="sheetPdfBtn">輸出 PDF</button>
+        <button id="sheetPngBtn">輸出 PNG</button>
+        <button id="openExportsBtn">開啟輸出資料夾</button>
+        <span class="hint" id="sheetState">依目前選的版本、上方 % 記號選項輸出（A4 直式）</span>
+      </div>
     </section>
   </div>
 
@@ -158,11 +181,22 @@ details summary { cursor: pointer; color: var(--muted); }
         <li>方格每一列是一種鼓、每一格是一個 16 分音符，點一下新增／刪除音符。每拍上方的「3」可切換成三連音。</li>
         <li>格子的<b style="color:var(--accent)">藍色深淺</b>＝AI 覺得那裡有擊打的程度；<b style="color:var(--warn)">橘點</b>＝寫的和 AI 聽到的不太一致，值得用耳朵確認。</li>
         <li>快捷鍵：<kbd>←</kbd><kbd>→</kbd> 換小節、<kbd>空白</kbd> 播放、<kbd>L</kbd> 循環、<kbd>Ctrl</kbd>+<kbd>Z</kbd>/<kbd>Y</kbd> 復原／重做、<kbd>Ctrl</kbd>+<kbd>C</kbd>/<kbd>V</kbd> 複製／貼上小節、<kbd>Ctrl</kbd>+<kbd>S</kbd> 儲存。</li>
-        <li>第一次儲存時會把 AI 原始版本備份成 <code>score.auto.json</code>；改過的小節之後重跑扒譜（score）也會保留。</li>
+        <li>AI 譜是唯讀的；在 AI 譜上點格子會先請你命名一個新的編輯版本（存在專案的 <code>versions/</code>），再套用修改。用上方的版本選單切換。</li>
       </ul>
     </details>
   </section>
 </main>
+<dialog id="nameDlg">
+  <h3>命名新版本</h3>
+  <div class="hint">AI 譜是唯讀的。要修改的話，會先複製成一個新的編輯版本，再套用這次修改。</div>
+  <input type="text" id="nameInp" maxlength="60" placeholder="例如：照原譜版">
+  <div class="row"><button id="nameCancel">取消</button><button id="nameOk" class="primary">建立並修改</button></div>
+</dialog>
+<dialog id="switchDlg">
+  <h3>目前的修改還沒儲存</h3>
+  <div class="hint">要怎麼處理這些修改？</div>
+  <div class="row" style="margin-top:14px"><button id="swCancel">取消</button><button id="swDiscard">放棄修改</button><button id="swSave" class="primary">存檔後切換</button></div>
+</dialog>
 <div id="toast"></div>
 
 <script>
@@ -177,7 +211,7 @@ const CLASS_OF = Object.fromEntries(ROWS.map(r => [r[0], r[3]]));
 const SUB16 = ["", "e", "&", "a"], SUB3 = ["", "T2", "T3"];
 const $ = id => document.getElementById(id);
 
-let P = null, score = null, act = null, cur = 0, dirty = false, clip = null;
+let P = null, V = "ai", versions = [], score = null, act = null, cur = 0, dirty = false, clip = null;
 let undoStack = [], redoStack = [];
 let lineTimer = null;
 
@@ -189,24 +223,73 @@ async function api(path, body) {
 }
 async function loadProjects() {
   const names = await api("/api/projects");
-  $("proj").innerHTML = names.map(n => `<option>${n}</option>`).join("");
+  $("proj").innerHTML = names.map(n => `<option value="${n.replace(/"/g, "&quot;")}">${n.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</option>`).join("");
   const want = new URLSearchParams(location.search).get("p") || localStorage.getItem("dce.proj");
   if (want && names.includes(want)) $("proj").value = want;
-  await loadProject($("proj").value);
+  await loadProject($("proj").value, "ai", true);
 }
-async function loadProject(name) {
-  if (dirty && !confirm("目前的修改還沒儲存，確定要切換嗎？")) { $("proj").value = P; return; }
-  const d = await api(`/api/score?p=${encodeURIComponent(name)}`);
-  P = name; score = d.score; act = d.act; undoStack = []; redoStack = []; setDirty(false);
+function ask(dlgId) {   // 開對話框，回傳按下的按鈕結果（Esc 視為 cancel）
+  return new Promise(res => {
+    const d = $(dlgId);
+    d._res = res;
+    d.showModal();
+  });
+}
+function answer(dlgId, value) {
+  const d = $(dlgId), r = d._res;
+  d._res = null;
+  d.close(value);
+  if (r) r(value);
+}
+for (const id of ["nameDlg", "switchDlg"])   // Esc 關閉視為取消
+  $(id).addEventListener("close", () => { const r = $(id)._res; $(id)._res = null; if (r) r("cancel"); });
+// 切換前處理未存修改。回傳 false 代表使用者取消。
+async function confirmLeave() {
+  if (!dirty) return true;
+  const r = await ask("switchDlg");
+  if (r === "save") { await save(); return true; }
+  return r === "discard";
+}
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+async function refreshVersions(selectId) {
+  versions = await api(`/api/versions?p=${encodeURIComponent(P)}`);
+  $("ver").innerHTML = versions.map(v => {
+    const gone = v.source_deleted;
+    const label = v.kind === "ai" ? "AI 譜（唯讀）" : v.kind === "old_ai" ? esc(v.name) + "（唯讀）" : esc(v.name);
+    return `<option value="${v.id}">${label}${gone ? "（來源已刪除）" : ""}${v.warning ? " ⚠" : ""}</option>`;
+  }).join("");
+  $("ver").value = selectId;
+}
+async function switchProject() {
+  if (!(await confirmLeave())) { $("proj").value = P; return; }
+  await loadProject($("proj").value, "ai", true);
+}
+async function switchVersion() {
+  if (!(await confirmLeave())) { $("ver").value = V; return; }
+  await loadProject(P, $("ver").value, true);
+}
+async function loadProject(name, vid = "ai", force = false) {
+  if (!force && dirty && !confirm("目前的修改還沒儲存，確定要切換嗎？")) { $("proj").value = P; return; }
+  const d = await api(`/api/score?p=${encodeURIComponent(name)}&v=${encodeURIComponent(vid)}`);
+  P = name; V = vid; score = d.score;
+  await refreshVersions(vid);
+  $("roHint").textContent = isReadOnly() ? "唯讀：點格子會先建立新版本" : "";
+  $("saveBtn").disabled = isReadOnly();
+  $("verRenameBtn").disabled = $("verDelBtn").disabled = isReadOnly();
+  const w = (versions.find(v => v.id === vid) || {}).warning;
+  $("verWarn").hidden = !w;
+  $("verWarn").textContent = w ? "⚠ " + w.message + `（第 ${w.bars.map(i => i + 1).join("、")} 小節）` : "";
+  act = d.act; undoStack = []; redoStack = []; setDirty(false);
   try { localStorage.setItem("dce.proj", name); } catch (e) {}
-  $("vid").src = d.media.includes("video.mp4") ? `/media/${P}/video.mp4` : "";
-  $("aud").src = d.media.includes("drums.wav") ? `/media/${P}/drums.wav` : "";
+  $("vid").src = d.media.includes("video.mp4") ? `/media/${encodeURIComponent(P)}/video.mp4` : "";
+  $("aud").src = d.media.includes("drums.wav") ? `/media/${encodeURIComponent(P)}/drums.wav` : "";
   $("srcSel").querySelector('[value=drums]').disabled = !d.media.includes("drums.wav");
   cur = Math.min(cur, score.bars.length - 1);
   if (name !== $("proj").dataset.last) cur = 0;
   $("proj").dataset.last = name;
   renderAll();
 }
+const isReadOnly = () => { const v = versions.find(v => v.id === V); return V === "ai" || (!!v && v.kind === "old_ai"); };
 const bar = () => score.bars[cur];
 function isTripletBeat(b, j) {
   return (b.triplets || []).includes(j) || b.events.some(e => Math.floor(e.tick / TICKS) === j && e.tick % 3 !== 0);
@@ -224,6 +307,56 @@ function setDirty(v) {
   $("saveState").className = v ? "dirty" : "saved";
 }
 
+// 在 AI 譜上要改時，先命名並複製成編輯版本，再執行修改
+async function ensureEditable() {
+  if (!isReadOnly()) return true;
+  const cur0 = cur;
+  $("nameInp").value = "";
+  const r = await ask("nameDlg");
+  const name = $("nameInp").value.trim();
+  if (r !== "ok" || !name) return false;
+  const v = await api(`/api/versions?p=${encodeURIComponent(P)}`, { name, source: V });
+  await loadProject(P, v.id, true);
+  cur = cur0; renderAll();
+  toast(`已建立新版本「${name}」`);
+  return true;
+}
+async function copyVersion() {
+  if (!(await confirmLeave())) return;
+  $("nameInp").value = "";
+  const r = await ask("nameDlg");
+  const name = $("nameInp").value.trim();
+  if (r !== "ok" || !name) return;
+  const v = await api(`/api/versions?p=${encodeURIComponent(P)}`, { name, source: V });
+  const cur0 = cur;
+  await loadProject(P, v.id, true);
+  cur = cur0; renderAll();
+  toast(`已複製成新版本「${name}」`);
+}
+async function renameVersion() {
+  const old = versions.find(v => v.id === V);
+  const name = (prompt("新的版本名稱", old ? old.name : "") || "").trim();
+  if (!name || name === old.name) return;
+  await api(`/api/version/rename?p=${encodeURIComponent(P)}&v=${V}`, { name });
+  await refreshVersions(V);
+  toast("已改名");
+}
+async function deleteVersion() {
+  const old = versions.find(v => v.id === V);
+  if (!confirm(`確定要刪除版本「${old.name}」嗎？此動作無法復原。`)) return;
+  await api(`/api/version/delete?p=${encodeURIComponent(P)}&v=${V}`, {});
+  dirty = false;
+  await loadProject(P, "ai", true);
+  toast("已刪除版本");
+}
+const safely = fn => () => fn().catch(e => toast("失敗：" + e.message));
+$("verCopyBtn").onclick = safely(copyVersion);
+$("verRenameBtn").onclick = safely(renameVersion);
+$("verDelBtn").onclick = safely(deleteVersion);
+function guarded(fn) {
+  return (...a) => { ensureEditable().then(ok => ok && fn(...a)).catch(e => toast("無法修改：" + e.message)); };
+}
+
 function toggleNote(tick, inst) {
   pushUndo();
   const b = bar();
@@ -239,6 +372,7 @@ function toggleNote(tick, inst) {
   b.events = b.events.filter(e => e.notes.length).sort((a, c) => a.tick - c.tick);
   changed();
 }
+toggleNote = guarded(toggleNote);
 function toggleTriplet(j) {
   pushUndo();
   const b = bar();
@@ -255,6 +389,8 @@ function toggleTriplet(j) {
   if (toTri) b.triplets.push(j);
   changed();
 }
+
+toggleTriplet = guarded(toggleTriplet);
 
 // ---------------------------------------------------------------- 不確定度
 function cellAct(i, cls, j, k, tri) {
@@ -293,7 +429,7 @@ function barUnsure(i) {
 }
 
 // ---------------------------------------------------------------- 畫面
-function renderAll() { renderOverview(); renderBar(); scheduleLine(); }
+function renderAll() { renderOverview(); renderBar(); previewDirty(); }
 
 function renderOverview() {
   const ov = $("overview");
@@ -382,31 +518,65 @@ function renderBar() {
   g.appendChild(ph);
 }
 
-function scheduleLine() { clearTimeout(lineTimer); lineTimer = setTimeout(renderLine, 120); }
-async function renderLine() {
-  const start = Math.floor(cur / 4) * 4;
-  const bars = score.bars.slice(start, start + 4);
-  try {
-    const d = await api("/api/line", { bars, first_no: start + 1, highlight: cur - start });
-    $("lineImg").src = "data:image/png;base64," + d.png;
-    $("lineImg").dataset.start = start;
-  } catch (e) { toast("譜面預覽失敗：" + e.message); }
+// ---- 即時預覽：譜面（與練習影片同一套排版）+ 游標，依影片時間顯示。內容以目前記憶體中的鼓譜為準（含未存檔修改）
+const pv = { rev: 0, cache: new Map(), lines: null, shown: null, loading: false, prefetch: false };
+function previewDirty() { pv.rev++; pv.cache.clear(); pv.lines = null; }
+async function fetchLine(li) {
+  const rev = pv.rev;
+  const d = await api("/api/preview_line", { score, line: li, simile: $("simileChk").checked });
+  if (rev === pv.rev) { pv.cache.set(li, d); pv.lines = d.lines; }
+}
+function previewTime() {
+  const v = $("vid");
+  return v.getAttribute("src") && v.readyState > 0 ? v.currentTime : bar().t0;
+}
+function previewFrame() {
+  if (!score) return;
+  const t = previewTime();
+  let li = 0;
+  if (pv.lines) for (let i = 0; i < pv.lines.length; i++) if (t >= pv.lines[i][0]) li = i;
+  const d = pv.cache.get(li);
+  if (!d) {
+    if (!pv.loading) { pv.loading = true; fetchLine(li).catch(e => toast("譜面預覽失敗：" + e.message)).finally(() => { pv.loading = false; }); }
+    return;
+  }
+  if (pv.shown !== d) { $("lineImg").src = "data:image/png;base64," + d.png; pv.shown = d; }
+  const c = $("lineCursor");
+  let x = null;
+  if (t >= d.t0 - 0.01) for (const [et, ex] of d.evs) { if (et <= t) x = ex; else break; }
+  if (x === null) { c.style.display = "none"; }
+  else {
+    const k = d.cursor;
+    c.style.display = "block";
+    c.style.left = ((x - k.dx) / d.width * 100) + "%";
+    c.style.width = (k.w / d.width * 100) + "%";
+    c.style.top = (k.y0 / d.height * 100) + "%";
+    c.style.height = ((k.y1 - k.y0) / d.height * 100) + "%";
+  }
+  if (!pv.loading && !pv.prefetch && pv.lines && li + 1 < pv.lines.length && !pv.cache.has(li + 1)) {   // 預先排好下一行
+    pv.prefetch = true;
+    fetchLine(li + 1).catch(() => {}).finally(() => { pv.prefetch = false; });
+  }
 }
 $("lineImg").onclick = ev => {
+  const d = pv.shown;
+  if (!d) return;
   const r = ev.target.getBoundingClientRect();
-  const x = (ev.clientX - r.left) / r.width * 1920;
-  const x0 = 40 + 8 + 60, bw = (1920 - 40 - x0) / 4;
-  const k = Math.floor((x - x0) / bw);
-  const i = +ev.target.dataset.start + k;
-  if (k >= 0 && k < 4 && i < score.bars.length) go(i);
+  const x = (ev.clientX - r.left) / r.width * d.width;
+  const m = d.measures.find(m => x >= m.x0 && x < m.x1);
+  if (m) go(m.bar);
 };
+$("simileChk").addEventListener("change", previewDirty);
+setInterval(previewFrame, 30);   // 不用 rAF：分頁在背景或被遮住時 rAF 會停
 
 function go(i) {
   if (i < 0 || i >= score.bars.length) return;
   const wasPlaying = playing;
   stop();
   cur = i;
-  renderAll();
+  renderOverview(); renderBar();
+  const v = $("vid");
+  if (v.getAttribute("src") && v.readyState > 0) v.currentTime = bar().t0;   // 預覽跟著影片時間，所以跳小節就是把影片跳過去
   if (wasPlaying && $("loopBtn").classList.contains("on")) play();
 }
 const fmt = t => `${Math.floor(t / 60)}:${(t % 60).toFixed(2).padStart(5, "0")}`;
@@ -415,31 +585,31 @@ function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add
 // ---------------------------------------------------------------- 編輯工具
 $("prevBtn").onclick = () => go(cur - 1);
 $("nextBtn").onclick = () => go(cur + 1);
-$("copyPrevBtn").onclick = () => {
+$("copyPrevBtn").onclick = guarded(() => {
   if (cur === 0) return;
   pushUndo();
   bar().events = JSON.parse(JSON.stringify(score.bars[cur - 1].events.map(e => ({ tick: e.tick, notes: e.notes }))));
   bar().triplets = [...(score.bars[cur - 1].triplets || [])];
   changed();
-};
+});
 $("copyBtn").onclick = () => { clip = JSON.stringify({ events: bar().events.map(e => ({ tick: e.tick, notes: e.notes })), triplets: bar().triplets || [] }); toast(`已複製第 ${cur + 1} 小節`); };
-$("pasteBtn").onclick = () => {
+$("pasteBtn").onclick = guarded(() => {
   if (!clip) return toast("還沒有複製任何小節");
   pushUndo();
   const c = JSON.parse(clip);
   bar().events = c.events; bar().triplets = c.triplets;
   changed();
-};
-$("clearBtn").onclick = () => { pushUndo(); bar().events = []; bar().triplets = []; changed(); };
-$("revertBtn").onclick = async () => {
-  const a = await api(`/api/auto_bar?p=${P}&i=${cur}`);
+});
+$("clearBtn").onclick = guarded(() => { pushUndo(); bar().events = []; bar().triplets = []; changed(); });
+$("revertBtn").onclick = guarded(async () => {
+  const a = await api(`/api/restore_bar?p=${encodeURIComponent(P)}&v=${V}&i=${cur}`);
   pushUndo();
   bar().events = a.events.map(e => ({ tick: e.tick ?? e.slot * 3, notes: e.notes }));
   bar().triplets = [];
   delete bar().edited;
   setDirty(true); renderAll();
-  toast("已還原為 AI 版本");
-};
+  toast("已還原成來源版本");
+});
 function undo() {
   const u = undoStack.pop(); if (!u) return;
   redoStack.push({ i: u.i, s: JSON.stringify(score.bars[u.i]) });
@@ -453,14 +623,22 @@ function redo() {
 $("undoBtn").onclick = undo;
 $("redoBtn").onclick = redo;
 async function save() {
-  const d = await api(`/api/score?p=${P}`, score);
-  const fresh = await api(`/api/score?p=${encodeURIComponent(P)}`);
+  if (isReadOnly()) return toast("這份鼓譜是唯讀的");
+  const d = await api(`/api/score?p=${encodeURIComponent(P)}&v=${V}`, score);
+  const fresh = await api(`/api/score?p=${encodeURIComponent(P)}&v=${V}`);
   score = fresh.score;
   setDirty(false); renderBar();
   toast(`已儲存（共 ${d.edited} 個小節有手動修改）`);
 }
 $("saveBtn").onclick = () => save().catch(e => toast("儲存失敗：" + e.message));
-$("proj").onchange = () => loadProject($("proj").value);
+$("proj").onchange = () => switchProject().catch(e => toast("切換失敗：" + e.message));
+$("ver").onchange = () => switchVersion().catch(e => toast("切換失敗：" + e.message));
+$("nameOk").onclick = () => { if ($("nameInp").value.trim()) answer("nameDlg", "ok"); };
+$("nameCancel").onclick = () => answer("nameDlg", "cancel");
+$("nameInp").addEventListener("keydown", e => { if (e.key === "Enter") $("nameOk").click(); });
+$("swSave").onclick = () => answer("switchDlg", "save");
+$("swDiscard").onclick = () => answer("switchDlg", "discard");
+$("swCancel").onclick = () => answer("switchDlg", "cancel");
 window.addEventListener("beforeunload", e => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
 
 // ---------------------------------------------------------------- 播放與合成鼓聲
@@ -543,23 +721,19 @@ function scheduleSynth(p) {
 function tick() {
   if (!playing) return;
   const p = player(), b = bar(), t = p.currentTime;
-  if (!sync && !p.paused && t > 0) {   // 第一個實際播放的畫格：建立媒體時間與 AudioContext 時間的對應
+  if (!sync && !p.paused && !p.seeking && p.readyState >= 3 && t > 0) {   // 第一個實際播放的畫格：建立媒體時間與 AudioContext 時間的對應
     sync = { ctx: ctx.currentTime, media: t };
     scheduleSynth(p);
   }
   // 播放頭
-  const ph = $("playhead"), bt = b.beats;
-  if (bt && t >= b.t0 && t <= b.t1) {
+  const ph = $("playhead"), bt = b.beats || Array.from({ length: b.ticks / TICKS + 1 }, (_, j) => b.t0 + (b.t1 - b.t0) * j / (b.ticks / TICKS));
+  const beatEls = $("grid").querySelectorAll(".beat");   // 前 nb 個是子拍標記列，位置與下方各列的拍一致
+  if (t >= b.t0 && t <= b.t1 && beatEls.length >= bt.length - 1) {
     let j = 0; while (j < bt.length - 2 && t >= bt[j + 1]) j++;
-    const pos = (j + (t - bt[j]) / (bt[j + 1] - bt[j])) / (bt.length - 1);
-    const g = $("grid"), first = g.querySelector(".beat:nth-child(2)") ? g.children[g.children.length - 1] : null;
-    const cells = g.querySelectorAll(".cell");
-    if (cells.length) {
-      const gr = g.getBoundingClientRect();
-      const left = 150, width = gr.width - 150 - 6;
-      ph.style.left = (left + pos * width) + "px";
-      ph.style.display = "block";
-    }
+    const frac = Math.min(1, Math.max(0, (t - bt[j]) / (bt[j + 1] - bt[j])));
+    const gr = $("grid").getBoundingClientRect(), br = beatEls[j].getBoundingClientRect();
+    ph.style.left = (br.left - gr.left + frac * br.width) + "px";
+    ph.style.display = "block";
   } else ph.style.display = "none";
   if (t >= b.t1 + 0.02) {
     if ($("loopBtn").classList.contains("on")) {
@@ -580,30 +754,61 @@ function stop() {
 $("playBtn").onclick = () => playing ? stop() : play();
 $("loopBtn").onclick = () => $("loopBtn").classList.toggle("on");
 for (const id of ["srcSel", "rateSel", "modeSel"]) $(id).onchange = () => { if (playing) play(); };
+// 選完下拉選單／勾選後把焦點還給頁面，否則 ←/→/空白/L 等快捷鍵會被表單元件吃掉
+document.addEventListener("change", e => { if (e.target.matches("select, input[type=checkbox]")) e.target.blur(); });
 $("vid").addEventListener("loadedmetadata", () => { if (!playing) $("vid").currentTime = bar().t0; });
 
 // ---------------------------------------------------------------- 輸出影片
 $("renderBtn").onclick = async () => {
   try {
-    if (dirty) await save();
-    await api(`/api/render?p=${P}`, { crop_y: +$("cropSel").value, simile: $("simileChk").checked });
-    $("renderBtn").disabled = true;
-    pollRender();
+    if (dirty && !isReadOnly()) await save();
+    await api(`/api/render?p=${encodeURIComponent(P)}&v=${encodeURIComponent(V)}`, { crop_y: +$("cropSel").value, simile: $("simileChk").checked });
+    pollJob();
   } catch (e) { toast("無法輸出：" + e.message); }
 };
-async function pollRender() {
-  const s = await api(`/api/render_status?p=${P}`);
-  const m = [...s.log.matchAll(/time=(\d+):(\d+):([\d.]+)/g)].pop();
-  const done = m ? (+m[1] * 3600 + +m[2] * 60 + +m[3]) : 0;
-  if (s.state === "running") {
-    $("renderState").textContent = `輸出中… ${fmt(done)}`;
-    setTimeout(pollRender, 1000);
+// ---------------------------------------------------------------- 輸出鼓譜圖檔
+async function exportSheet(format) {
+  try {
+    if (dirty && !isReadOnly()) await save();
+    $("sheetState").textContent = "輸出中…";
+    const r = await api(`/api/export_sheet?p=${encodeURIComponent(P)}`, { version: V, format, simile: $("simileChk").checked });
+    $("sheetState").textContent = `完成：exports/${r.files[0]}${r.files.length > 1 ? ` 等 ${r.files.length} 張` : ""}（共 ${r.pages} 頁）`;
+  } catch (e) { $("sheetState").textContent = ""; toast("無法輸出：" + e.message); }
+}
+$("sheetPdfBtn").onclick = () => exportSheet("pdf");
+$("sheetPngBtn").onclick = () => exportSheet("png");
+$("openExportsBtn").onclick = () => api(`/api/open_exports?p=${encodeURIComponent(P)}`, {}).catch(e => toast("無法開啟：" + e.message));
+
+$("reimportBtn").onclick = async () => {
+  try {
+    if (!(await confirmLeave())) return;
+    if (!confirm("重新扒譜會把目前的 AI 譜保存成唯讀的舊 AI 譜，你的編輯版本不會改變。確定要開始嗎？")) return;
+    await api(`/api/projects/reimport?p=${encodeURIComponent(P)}`, {});
+    pollJob();
+  } catch (e) { toast("無法重新扒譜：" + e.message); }
+};
+
+// 工作狀態在伺服器端；重開分頁時也會從這裡接回進度
+let jobTimer = null, lastKind = null, lastState = null;
+async function pollJob() {
+  clearTimeout(jobTimer);
+  const s = await api("/api/job");
+  const busy = s.state === "running";
+  $("renderBtn").disabled = busy;
+  $("reimportBtn").disabled = busy;
+  if (lastKind === "reimport" && lastState === "running" && !busy && s.state === "done" && P) { if (dirty) refreshVersions(V); else loadProject(P, V, true); }
+  lastKind = s.kind; lastState = s.state;
+  $("renderBtn").title = busy ? "有工作正在執行，請等它結束" : "";
+  if (busy) {
+    const pct = Math.round((s.progress || 0) * 100);
+    $("renderState").textContent = `${s.kind === "render" ? "輸出中" : s.kind === "reimport" ? "重新扒譜中" : "執行中"}（${s.project}）${s.step || ""} ${pct}%`;
+    jobTimer = setTimeout(pollJob, 1000);
   } else {
-    $("renderBtn").disabled = false;
-    $("renderState").textContent = s.state === "done" ? `完成：projects/${P}/out.mp4` : (s.state === "error" ? "輸出失敗" : "");
-    $("renderLog").textContent = s.state === "error" ? s.log.slice(-300) : "";
+    $("renderState").textContent = s.state === "done" ? (s.output ? `完成：projects/${s.project}/${s.output}` : "完成") : (s.state === "error" ? (s.kind === "reimport" ? "重新扒譜失敗" : "輸出失敗") : "");
+    $("renderLog").textContent = s.state === "error" ? s.error : "";
   }
 }
+pollJob();
 
 // ---------------------------------------------------------------- 快捷鍵
 document.addEventListener("keydown", e => {
