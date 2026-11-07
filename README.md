@@ -14,7 +14,7 @@
 需要 Python 3.10 以上。建議有 NVIDIA 顯卡（分離與輸出影片都會快很多）。
 
 ```bash
-git clone --recurse-submodules https://github.com/<你的帳號>/drumCover.git
+git clone --recurse-submodules https://github.com/xdboyx/drumCover.git
 cd drumCover
 ```
 
