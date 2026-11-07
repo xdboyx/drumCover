@@ -7,7 +7,7 @@
 - `tools/drumcover.py`：主流程 CLI（`download / analyze / score / render / all`）
 - `tools/notation.py`：鼓譜排版器（PIL 手繪，雙聲部日系鼓譜慣例）
 - `tools/evaluate.py`、`tools/gt_tools.py`：拿附有鼓譜的影片驗證扒譜準確度
-- `tools/editor/`：逐小節編輯器（**擱置中的草稿，未測試**，見 `docs/future-ideas.md`）
+- `tools/editor/`：本機網頁操作介面的草稿（扒譜、預覽、編輯版本、輸出；**規劃已定案、尚未實作**，見 `docs/future-ideas.md` 第 1 節）
 - `projects/<name>/`：每首歌的中間檔與成品（video.mp4、score.json、out.mp4…）
 - `third_party/ADTOF-pytorch/`：扒鼓模型
 - 一律使用專案 venv：`.venv/Scripts/python.exe`
