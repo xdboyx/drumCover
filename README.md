@@ -36,7 +36,35 @@ python -m venv .venv
 
 沒有 NVIDIA 顯卡時，torch 改裝 CPU 版，輸出影片時加 `--codec libx264`。
 
-## 基本用法
+## 用 Claude Code skill 使用（推薦）
+
+這個專案的主要用法，是在 [Claude Code](https://claude.com/claude-code) 裡開啟專案資料夾，直接叫 skill 幫你跑完整流程，不用自己記指令。
+
+1. 照上面「安裝」完成 clone 與環境建置（環境不確定時，也可以直接對 Claude 說「幫我照 README 安裝環境」）。
+2. 用 Claude Code 開啟 `drumCover` 資料夾。`.claude/skills/` 底下的 skill 會自動載入。
+3. 直接用口語說，或輸入 `/skill 名稱` 呼叫。
+
+| Skill | 用途 | 怎麼叫 |
+| --- | --- | --- |
+| `drum-score-video` | 把歌曲影片做成鼓譜練習影片 | `/drum-score-video`，或說「幫這首歌做鼓譜影片」，直接貼 YouTube 網址也可以 |
+| `drum-score-validate` | 拿附有鼓譜的影片驗證扒譜準確度、找出落差原因 | `/drum-score-validate`，或說「拿這支有譜的影片驗證」「這段過門扒得不準，幫我找原因」 |
+
+### 範例
+
+```text
+幫這首歌做鼓譜影片 https://www.youtube.com/watch?v=XXXX
+```
+
+`drum-score-video` 會依序：
+1. 先問你要不要下載（會列出影片標題與大小），以及要不要用 `%` 反覆記號。
+2. 下載、分離鼓聲、辨識、量化成譜，並先檢查 `score_preview.png`。
+3. 先輸出 20 秒試片確認同步與版面，沒問題再輸出整首。
+
+成品在 `projects/<名稱>/out.mp4`。
+
+已有本地影片的話，放成 `projects/<名稱>/video.mp4`，再對 Claude 說「用這支影片做鼓譜影片」即可。
+
+## 手動用法（不透過 skill）
 
 所有指令都用專案 venv 執行，格式是 `drumcover.py <指令> <專案名稱> [選項]`，中間檔與成品都放在 `projects/<專案名稱>/`。
 
