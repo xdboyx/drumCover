@@ -30,7 +30,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 import drumcover as dc                      # noqa: E402
 from jobs import JobRunner, Busy            # noqa: E402
-from render_job import render_steps         # noqa: E402
+from render_job import render_steps, ILLEGAL_CHARS   # noqa: E402
 from notation import LineRenderer, Layout   # noqa: E402
 import sheet_export                          # noqa: E402
 import pipeline as real_pipeline            # noqa: E402
@@ -54,6 +54,7 @@ class HttpError(Exception):
 
 
 RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+LOCAL_HOSTS = {"127.0.0.1", "localhost"}
 AUDIO_SOURCES = ("drums", "mix", "max", "hybrid")
 
 
@@ -64,7 +65,7 @@ def check_name(name):
         raise HttpError(400, "專案名稱不能空白")
     if len(name) > 80:
         raise HttpError(400, "專案名稱太長（最多 80 字）")
-    if re.search(r'[<>:"/\\|?*\x00-\x1f]', name):
+    if ILLEGAL_CHARS.search(name):
         raise HttpError(400, '專案名稱不能包含 < > : " / \\ | ? * 這些字元')
     if name.endswith(".") or name.split(".")[0].strip().upper() in RESERVED_NAMES:
         raise HttpError(400, "專案名稱不合法（不能以 . 結尾，也不能用 Windows 保留字）")
@@ -155,11 +156,17 @@ def new_project(body):
 def retry_project(name):
     """新增專案的扒譜失敗後重試：從失敗那一步開始，前面各步的中間檔沿用。"""
     P = project_dir(name)
+    st = runner.status()
+    if st.get("state") == "error" and st.get("kind") == "reimport" and st.get("project") == name             and last_reimport.get("project") == name:
+        try:
+            runner.submit("reimport", name, last_reimport["steps"], start_at=st["failed_step"])
+        except Busy as e:
+            return 409, {"error": str(e), "busy": True, "job": e.status}
+        return 200, {"ok": True, "name": name}
     f = P / "import.json"
     if not f.exists() or (P / "score.json").exists():
         raise HttpError(400, "這個專案不是扒譜失敗的專案，不能重試")
     d = json.loads(f.read_text(encoding="utf-8"))
-    st = runner.status()
     failed_here = st.get("state") == "error" and st.get("project") == name and st.get("kind") == "import"
     return submit_import(P, d["source"], d["opts"], st["failed_step"] if failed_here else 0)
 
@@ -178,7 +185,10 @@ def reimport_steps(P, opts):
     pl = pipeline()
     st = {}
 
-    def snapshot(report):
+    def snapshot(report=None):
+        f = st.get("file")
+        if f and f.exists():
+            return   # 重試時前面已經保存過
         now = datetime.now()
         vid = uuid.uuid4().hex[:8]
         data = json.loads((P / "score.json").read_text(encoding="utf-8"))
@@ -192,6 +202,7 @@ def reimport_steps(P, opts):
     def guard(fn):
         def run(report):
             try:
+                snapshot()   # 重試從中間步驟開始時，失敗當下已清掉快照，這裡補回
                 fn(report)
             except BaseException:
                 if (P / "score.json").read_bytes() == st["before"]:
@@ -208,9 +219,12 @@ def reimport_steps(P, opts):
         f.write_text(json.dumps(old, ensure_ascii=False, indent=1), encoding="utf-8")
 
     return [("保存舊 AI 譜", snapshot),
-            ("扒譜", guard(lambda report: pl.transcribe(P, opts, report))),
+            ("扒譜", guard(lambda report: pl.transcribe(P, opts, report, force=True))),   # 已有的 act_*.npy / beats.json 也要重做
             ("排版", guard(lambda report: pl.score(P, opts, report))),
             ("比對", compare)]
+
+
+last_reimport = {}   # 最近一次重新扒譜的 {project, steps}，失敗重試時沿用同一組步驟（保有舊 AI 譜快照的狀態）
 
 
 def reimport_project(name):
@@ -218,9 +232,11 @@ def reimport_project(name):
     f = P / "import.json"
     opts = json.loads(f.read_text(encoding="utf-8")).get("opts", {}) if f.exists() else {}
     try:
-        runner.submit("reimport", P.name, reimport_steps(P, opts))
+        steps = reimport_steps(P, opts)
+        runner.submit("reimport", P.name, steps)
     except Busy as e:
         return 409, {"error": str(e), "busy": True, "job": e.status}
+    last_reimport.update(project=P.name, steps=steps)
     return 200, {"ok": True, "name": P.name}
 
 
@@ -230,6 +246,8 @@ def project_list():
     for d in sorted(p for p in PROJECTS_ROOT.iterdir() if p.is_dir() and not p.name.startswith(("_", "."))):
         mine = st.get("project") == d.name and st.get("kind") == "import"
         item = {"name": d.name, "status": "ready", "error": None}
+        if st.get("project") == d.name and st.get("kind") == "reimport" and st["state"] == "error":
+            item.update(reimport_error=st["error"], reimport_failed_step=st["steps"][st["failed_step"]])
         if mine and st["state"] == "running":
             item.update(status="running", step=st["step"], progress=st["progress"])
         elif mine and st["state"] == "error":
@@ -449,6 +467,18 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
 
+    def _local_only(self, post):
+        """擋 DNS rebinding / CSRF：Host 必須是本機（含埠），POST 帶 Origin 時也必須是本機。"""
+        host = urlparse("//" + (self.headers.get("Host") or "")).hostname
+        if host not in LOCAL_HOSTS:
+            self._send(403, {"error": "只接受本機（127.0.0.1 / localhost）的請求"})
+            return False
+        origin = self.headers.get("Origin")
+        if post and origin is not None and (urlparse(origin).hostname not in LOCAL_HOSTS):
+            self._send(403, {"error": "不接受來自其他網站的請求"})
+            return False
+        return True
+
     def _send(self, code, body, ctype="application/json; charset=utf-8", headers=None):
         if isinstance(body, (dict, list)):
             body = json.dumps(body, ensure_ascii=False).encode("utf-8")
@@ -500,6 +530,8 @@ class Handler(BaseHTTPRequestHandler):
                 pass
 
     def do_GET(self):
+        if not self._local_only(False):
+            return
         u = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
         try:
@@ -546,6 +578,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(e.code, {"error": e.msg})
 
     def do_POST(self):
+        if not self._local_only(True):
+            return
         u = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
         try:

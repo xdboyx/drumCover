@@ -4,7 +4,7 @@
     title(source) -> str
     download(P, source, opts, report)     # 取得 video.mp4 與 mix.wav（opts: start / dur）
     separate(P, opts, report)             # Demucs 分離鼓聲 -> drums.wav
-    transcribe(P, opts, report)           # ADTOF 機率 + 拍點 -> act_*.npy、beats.json
+    transcribe(P, opts, report, force=False)  # ADTOF 機率 + 拍點 -> act_*.npy、beats.json（force 重做已有的）
     score(P, opts, report)                # 量化成 score.json（opts: audio 扒譜音源）
 P 是專案資料夾；report(0~1) 回報目前步驟進度；失敗就丟例外。
 這裡的正式實作都是呼叫 drumcover.py 的子行程，已存在的中間檔該步會自己跳過。
@@ -46,8 +46,9 @@ def separate(P, opts, report):
     _drumcover(P, "separate", report)
 
 
-def transcribe(P, opts, report):
-    _drumcover(P, "transcribe", report)
+def transcribe(P, opts, report, force=False):
+    """force=True（重新扒譜）：已存在的 act_*.npy、beats.json 也要用目前程式重做。"""
+    _drumcover(P, "transcribe", report, *(["--force"] if force else []))
 
 
 def score(P, opts, report):

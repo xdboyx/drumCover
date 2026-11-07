@@ -152,7 +152,11 @@ async function refresh() {
       badge = `<span class="badge failed">失敗</span>`;
       body = `<div class="msg">${p.failed_step ? "失敗步驟：" + esc(p.failed_step) + "\n" : ""}${esc(p.error || "")}</div>`;
     }
-    const act = p.status === "ready" ? `<a class="open" href="/editor?p=${encodeURIComponent(p.name)}"><button class="primary">開啟</button></a>`
+    if (p.status === "ready" && p.reimport_error) {
+      badge = `<span class="badge failed">重新扒譜失敗</span>`;
+      body = `<div class="msg">失敗步驟：${esc(p.reimport_failed_step)}\n${esc(p.reimport_error)}</div>`;
+    }
+    const act = p.status === "ready" ? (p.reimport_error ? `<button data-retry="${esc(p.name)}" ${busy ? "disabled" : ""}>從「${esc(p.reimport_failed_step)}」重試</button> ` : "") + `<a class="open" href="/editor?p=${encodeURIComponent(p.name)}"><button class="primary">開啟</button></a>`
       : p.status === "failed" ? `<button data-retry="${esc(p.name)}" ${busy ? "disabled" : ""}>${p.failed_step ? "從「" + esc(p.failed_step) + "」重試" : "重試"}</button>` : "";
     return `<div class="proj"><div class="grow"><span class="name">${esc(p.name)}</span> ${badge}${body}</div>${act}</div>`;
   }).join("") : `<span class="hint">還沒有專案，從上面貼一個 YouTube 網址開始。</span>`;

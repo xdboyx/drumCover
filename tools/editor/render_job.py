@@ -12,9 +12,12 @@ ROOT = TOOLS.parent
 PROGRESS = re.compile(r"PROGRESS (\d+)/(\d+)")
 
 
+ILLEGAL_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')   # Windows 檔名不允許的字元（專案名稱檢查與檔名清理共用）
+
+
 def safe_filename(name):
     """Windows 檔名不允許的字元換成底線。"""
-    s = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name).strip().rstrip(".")
+    s = ILLEGAL_CHARS.sub("_", name).strip().rstrip(".")
     return s or "_"
 
 

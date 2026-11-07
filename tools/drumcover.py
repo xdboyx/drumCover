@@ -98,20 +98,21 @@ def separate_drums(P):
         src.replace(P / "drums.wav")
 
 
-def transcribe_activations(P):
+def transcribe_activations(P, force=False):
+    """force=True 時忽略已存在的 act_*.npy / beats.json 重新計算（算完才覆蓋，失敗不會留下半成品）。"""
     device = _device()
     # 2) ADTOF 逐幀擊打機率（100fps，5 類 BD/SD/TT/HH/CY）。鼓聲音軌與完整混音各跑一次：
     #    ADTOF 是用完整混音訓練的，分離後的音軌會讓輕的 hi-hat 變弱，兩者互補。
     from adtof_pytorch import transcribe_to_midi
     for src in ("drums", "mix"):
         out = P / f"act_{src}.npy"
-        if not out.exists():
+        if force or not out.exists():
             act = transcribe_to_midi(str(P / f"{src}.wav"), str(P / "tmp.mid"), device=device,
                                      return_activations=True)
             np.save(out, act[0])
 
     # 3) 拍點 / 小節線（用完整混音，節奏資訊最完整）
-    if not (P / "beats.json").exists():
+    if force or not (P / "beats.json").exists():
         from beat_this.inference import File2Beats
         beats, downbeats = File2Beats(checkpoint_path="final0", device=device, dbn=False)(str(P / "mix.wav"))
         (P / "beats.json").write_text(json.dumps({"beats": list(map(float, beats)),
@@ -631,6 +632,7 @@ def main():
     ap.add_argument("--crop-y", type=float, default=0.5, help="畫面上下裁切位置 0=保留頂部 1=保留底部")
     ap.add_argument("--lead", type=float, default=0.0, help="游標提早量（秒）")
     ap.add_argument("--codec", default=os.environ.get("DRUMCOVER_CODEC", "h264_nvenc"))
+    ap.add_argument("--force", action="store_true", help="transcribe：已有的機率與拍點檔也重做")
     ap.add_argument("--no-simile", action="store_true", help="不使用 % 反覆記號，每小節都寫出來")
     ap.add_argument("--source", default="hybrid", choices=["drums", "mix", "max", "hybrid"], help="ADTOF 機率來源")
     a = ap.parse_args()
@@ -644,7 +646,7 @@ def main():
     if a.cmd == "separate":
         separate_drums(proj(a.name))
     if a.cmd == "transcribe":
-        transcribe_activations(proj(a.name))
+        transcribe_activations(proj(a.name), force=a.force)
     if a.cmd in ("score", "all"):
         cmd_score(a)
     if a.cmd in ("render", "all"):

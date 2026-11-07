@@ -4,7 +4,10 @@
 
 ---
 
-## 1. drumCover 操作介面：扒譜、預覽、編輯版本、輸出（規劃定案，2026-11-07）
+## 1. drumCover 操作介面：扒譜、預覽、編輯版本、輸出（規劃定案，2026-11-07；**第一版已實作**，tickets #2–#10）
+
+> 實作狀態：第一版範圍內的功能已完成（`tools/editor/`，啟動用根目錄的 `啟動操作介面.bat`），測試在 `tests/`。
+> 下面的規劃保留當時的決策脈絡；與現況不同之處已就地標註。「第二版」項目與草稿 API 表中的舊端點仍是未做／已作廢。
 
 ### 動機
 
@@ -19,7 +22,7 @@ AI 自動扒譜在 KICK BACK 驗證的準確度約 95.6%（完全正確的小節
 ### 定案的規劃（2026-11-07 拷問結果）
 
 **架構**
-- 本機網頁：Python 伺服器只綁 `127.0.0.1:8765`，只給這台電腦用。根目錄放 `drumCover.bat`，雙擊用 venv 啟動伺服器並自動開瀏覽器；
+- 本機網頁：Python 伺服器只綁 `127.0.0.1:8765`，只給這台電腦用。根目錄放 `啟動操作介面.bat`（已實作），雙擊用 venv 啟動伺服器並自動開瀏覽器；
   關掉命令列視窗就結束。`.claude/launch.json` 加一個設定，供 Browser pane 測試
 - 沿用 `tools/editor/` 草稿繼續做（下面「草稿既有設計」）
 - **不經過 Claude**：直接呼叫 `drumcover.py` 的 download → analyze → score；skill 的臨場判斷（剪片頭、裁切位置）改成畫面上的選項。
@@ -67,7 +70,7 @@ AI 自動扒譜在 KICK BACK 驗證的準確度約 95.6%（完全正確的小節
 
 ### 草稿既有設計（沿用，要配合上面的版本機制調整）
 
-已寫好草稿，**尚未測試、也還沒接上流程**：
+草稿已發展成正式實作（以下檔案現在都有測試，並接上扒譜／輸出流程；另有 `jobs.py`、`pipeline.py`、`render_job.py`、`sheet_export.py`、`home.html`）：
 
 - `tools/editor/server.py`：本機伺服器（Python 標準庫 `ThreadingHTTPServer`，不需要新套件）
 - `tools/editor/index.html`：單一檔案前端（原生 JS + CSS）
@@ -79,10 +82,14 @@ AI 自動扒譜在 KICK BACK 驗證的準確度約 95.6%（完全正確的小節
                                     └─ 呼叫 drumcover.py / notation.py（跟成品影片同一套排版器）
 ```
 
-啟動：`.venv/Scripts/python.exe tools/editor/server.py`，然後開 http://localhost:8765
-（要用 Claude 的 Browser pane 預覽時，在 `.claude/launch.json` 加一個設定）。
+啟動：雙擊 `啟動操作介面.bat`，或 `.venv/Scripts/python.exe tools/editor/server.py --open`，然後開 http://127.0.0.1:8765
+（伺服器只接受 Host 為 127.0.0.1／localhost 的請求，POST 帶 Origin 時也必須是本機）。
 
 ### 後端 API（server.py）
+
+> 下表是**草稿時期**的端點，已過時：`score.auto.json` 備份與 `/api/auto_bar` 已作廢（改用版本機制：`/api/versions`、
+> `/api/score?v=`、`/api/projects/*`、`/api/job` 等），`/api/render`、`/api/render_status` 也改成走長時間工作佇列。
+> 現行端點以 `tools/editor/server.py` 為準。
 
 | 方法 | 路徑 | 用途 |
 |---|---|---|

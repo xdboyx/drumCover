@@ -34,8 +34,8 @@ def separate(P, opts, report):
     _step("separate")
 
 
-def transcribe(P, opts, report):
-    _step("transcribe")
+def transcribe(P, opts, report, force=False):
+    _step("transcribe force" if force else "transcribe")
 
 
 def score(P, opts, report):
@@ -197,3 +197,32 @@ def test_沒有AI譜的專案不能重新扒譜(srv, projects_root):
     (projects_root / "空專案").mkdir()
     code, _ = call("POST", f"{srv}/api/projects/reimport?p={urllib.parse.quote('空專案')}")
     assert code in (400, 404)
+
+
+def test_重新扒譜要求扒譜步驟強制重做中間檔(srv, fake):
+    do_reimport(srv)
+    log = (fake / "calls.log").read_text(encoding="utf-8").splitlines()
+    assert "transcribe force" in log and "transcribe" not in log
+    assert "separate" not in log   # 分離鼓聲沿用
+
+
+def test_失敗的重新扒譜可以從失敗那一步重試(srv, fake):
+    set_next(fake, 2.5)
+    (fake / "fail").write_text("1")
+    assert reimport(srv)[0] == 200
+    wait_state(srv, "error")
+    assert old_ai(srv) == []
+    # 首頁清單標出失敗並提供重試所需資訊
+    item = [p for p in call("GET", f"{srv}/api/project_list")[1] if p["name"] == "假歌"][0]
+    assert item["status"] == "ready" and item["reimport_error"] and item["reimport_failed_step"]
+    (fake / "fail").unlink()
+    assert call("POST", f"{srv}/api/projects/retry?p={NAME}")[0] == 200
+    wait_state(srv, "done")
+    assert len(old_ai(srv)) == 1
+    assert call("GET", f"{srv}/api/score?p={NAME}")[1]["score"]["bars"][1]["t0"] == 2.5
+    item = [p for p in call("GET", f"{srv}/api/project_list")[1] if p["name"] == "假歌"][0]
+    assert not item.get("reimport_error")
+
+
+def test_沒有失敗工作時有AI譜的專案不能重試(srv):
+    assert call("POST", f"{srv}/api/projects/retry?p={NAME}")[0] == 400
