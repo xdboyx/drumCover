@@ -109,7 +109,7 @@ def test_忙碌時拒絕新工作但仍可編輯存檔預覽(srv, fake):
     # 工作進行中仍可讀取、存檔、預覽
     assert call("GET", f"{srv}/api/score?p={NAME}&v={vid}")[0] == 200
     set_tick(srv, vid, 12)
-    assert call("POST", f"{srv}/api/line", {"bars": FAKE_SCORE["bars"], "first_no": 1})[0] == 200
+    assert call("POST", f"{srv}/api/preview_line", {"score": FAKE_SCORE, "line": 0})[0] == 200
     release(fake)
     wait_state(srv, "done")
 
@@ -195,3 +195,15 @@ def test_實際用ffmpeg輸出練習影片(projects_root):
         assert start(base, vid)[0] == 200
         wait_state(base, "done", timeout=120)
     assert (P / "exports" / "簡化版.mp4").stat().st_size > 1000
+
+
+@pytest.mark.parametrize("name,stem", [("CON", "_CON"), ("結尾點.. ", "結尾點"), ("a<b>c", "a_b_c"), ("aux.txt", "_aux.txt")])
+def test_mp4與PDF檔名一致且合法(srv, fake, projects_root, name, stem):
+    vid = new_version(srv, name=name)
+    release(fake)
+    assert start(srv, vid)[0] == 200
+    wait_state(srv, "done")
+    code, r = call("POST", f"{srv}/api/export_sheet?p={NAME}", {"version": vid, "format": "pdf"})
+    assert code == 200
+    names = sorted(f.name for f in (projects_root / "假歌" / "exports").iterdir())
+    assert names == sorted([stem + ".mp4", stem + ".pdf"])

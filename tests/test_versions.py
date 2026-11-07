@@ -211,3 +211,31 @@ def test_還原小節的錯誤情況(server):
     assert restore(server, "ai")[0] == 403
     assert restore(server, "nope")[0] == 404
     assert restore(server, v["id"], i=5)[0] == 404
+
+
+# ---- 版本名稱唯一（輸出檔名會用到，不能互相覆蓋）----
+
+def test_建立版本名稱重複或撞保留名稱會拒絕(server):
+    create(server, "簡化版")
+    for dup in ("簡化版", " 簡化版 ", "AI 譜", "ai 譜"):
+        code, r = call("POST", f"{server}/api/versions?p={NAME}", {"name": dup, "source": "ai"})
+        assert code == 409 and "名稱" in r["error"], dup
+    assert [v["name"] for v in version_list(server)] == ["AI 譜", "簡化版"]
+
+
+def test_名稱轉成檔名後會撞檔的也拒絕(server):
+    create(server, "a/b")
+    assert call("POST", f"{server}/api/versions?p={NAME}", {"name": "a:b", "source": "ai"})[0] == 409
+    create(server, "CON")
+    assert call("POST", f"{server}/api/versions?p={NAME}", {"name": "con", "source": "ai"})[0] == 409
+    assert call("POST", f"{server}/api/versions?p={NAME}", {"name": "x.", "source": "ai"})[0] == 200
+    assert call("POST", f"{server}/api/versions?p={NAME}", {"name": "x", "source": "ai"})[0] == 409
+
+
+def test_改名不能跟其他版本或AI譜重複_但可以改成自己現在的名稱(server):
+    a = create(server, "甲")[1]
+    create(server, "乙")
+    assert rename(server, a["id"], "乙")[0] == 409
+    assert rename(server, a["id"], "AI 譜")[0] == 409
+    assert rename(server, a["id"], "甲")[0] == 200
+    assert rename(server, a["id"], "丙")[0] == 200

@@ -2,20 +2,8 @@
 import os
 import re
 
+from filenames import safe_filename
 from notation import render_sheet
-
-_ILLEGAL = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
-_RESERVED = re.compile(r"(?i)^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$")
-
-
-def safe_filename(name):
-    """版本名稱 -> Windows 可用的檔名（不含副檔名）。"""
-    s = _ILLEGAL.sub("_", name).strip().rstrip(". ")
-    if not s:
-        s = "_"
-    if _RESERVED.match(s):
-        s = "_" + s
-    return s
 
 
 def export_sheet(P, score, display_measures, version_name, fmt, simile=True):

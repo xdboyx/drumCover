@@ -580,7 +580,7 @@ function go(i) {
   if (wasPlaying && $("loopBtn").classList.contains("on")) play();
 }
 const fmt = t => `${Math.floor(t / 60)}:${(t % 60).toFixed(2).padStart(5, "0")}`;
-function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 1800); }
+function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), Math.max(1800, msg.length * 150)); }   // 長訊息（如名稱重複的錯誤）多停一會
 
 // ---------------------------------------------------------------- 編輯工具
 $("prevBtn").onclick = () => go(cur - 1);

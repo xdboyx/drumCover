@@ -226,3 +226,14 @@ def test_失敗的重新扒譜可以從失敗那一步重試(srv, fake):
 
 def test_沒有失敗工作時有AI譜的專案不能重試(srv):
     assert call("POST", f"{srv}/api/projects/retry?p={NAME}")[0] == 400
+
+def test_重新扒譜執行中首頁清單標示扒譜中(srv, fake):
+    (fake / "hold").write_text("1")
+    assert reimport(srv)[0] == 200
+    wait_state(srv, "running")
+    item = [p for p in call("GET", f"{srv}/api/project_list")[1] if p["name"] == "假歌"][0]
+    assert item["status"] == "running" and item["step"]
+    (fake / "hold").unlink()
+    wait_state(srv, "done")
+    item = [p for p in call("GET", f"{srv}/api/project_list")[1] if p["name"] == "假歌"][0]
+    assert item["status"] == "ready"

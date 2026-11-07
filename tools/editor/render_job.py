@@ -7,18 +7,11 @@ import sys
 import tempfile
 from pathlib import Path
 
+from filenames import safe_filename
+
 TOOLS = Path(__file__).resolve().parent.parent
 ROOT = TOOLS.parent
 PROGRESS = re.compile(r"PROGRESS (\d+)/(\d+)")
-
-
-ILLEGAL_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')   # Windows 檔名不允許的字元（專案名稱檢查與檔名清理共用）
-
-
-def safe_filename(name):
-    """Windows 檔名不允許的字元換成底線。"""
-    s = ILLEGAL_CHARS.sub("_", name).strip().rstrip(".")
-    return s or "_"
 
 
 def run_logged(cmd, report, cwd=None):

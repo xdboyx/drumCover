@@ -5,20 +5,20 @@
 """
 import argparse
 import base64
+import importlib.util
 import io
 import json
+import os
 import re
 import shutil
 import sys
 import threading
 import uuid
-from datetime import datetime
 import webbrowser
-import importlib.util
-import os
-from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+from datetime import datetime
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse, parse_qs, unquote
+from urllib.parse import parse_qs, unquote, urlparse
 
 import numpy as np
 
@@ -29,11 +29,12 @@ sys.path.insert(0, str(TOOLS))
 sys.stdout.reconfigure(encoding="utf-8")
 
 import drumcover as dc                      # noqa: E402
-from jobs import JobRunner, Busy            # noqa: E402
-from render_job import render_steps, ILLEGAL_CHARS   # noqa: E402
-from notation import LineRenderer, Layout   # noqa: E402
-import sheet_export                          # noqa: E402
 import pipeline as real_pipeline            # noqa: E402
+import sheet_export                         # noqa: E402
+from filenames import ILLEGAL_CHARS, filename_key, is_reserved   # noqa: E402
+from jobs import Busy, JobRunner            # noqa: E402
+from notation import Layout, LineRenderer   # noqa: E402
+from render_job import render_steps         # noqa: E402
 
 # 編輯器的樂器列 -> ADTOF 類別（用來顯示模型信心）
 ACT_CLASS = {"CR": "CY", "RD": "CY", "HH": "HH", "HO": "HH", "SD": "SD", "XS": "SD",
@@ -53,7 +54,6 @@ class HttpError(Exception):
         self.code, self.msg = code, msg
 
 
-RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
 LOCAL_HOSTS = {"127.0.0.1", "localhost"}
 AUDIO_SOURCES = ("drums", "mix", "max", "hybrid")
 
@@ -67,7 +67,7 @@ def check_name(name):
         raise HttpError(400, "專案名稱太長（最多 80 字）")
     if ILLEGAL_CHARS.search(name):
         raise HttpError(400, '專案名稱不能包含 < > : " / \\ | ? * 這些字元')
-    if name.endswith(".") or name.split(".")[0].strip().upper() in RESERVED_NAMES:
+    if name.endswith(".") or is_reserved(name):
         raise HttpError(400, "專案名稱不合法（不能以 . 結尾，也不能用 Windows 保留字）")
     return name
 
@@ -157,9 +157,11 @@ def retry_project(name):
     """新增專案的扒譜失敗後重試：從失敗那一步開始，前面各步的中間檔沿用。"""
     P = project_dir(name)
     st = runner.status()
-    if st.get("state") == "error" and st.get("kind") == "reimport" and st.get("project") == name             and last_reimport.get("project") == name:
+    failed_reimport = (st.get("state") == "error" and st.get("kind") == "reimport"
+                       and st.get("project") == name and last_reimport.project == name)
+    if failed_reimport:
         try:
-            runner.submit("reimport", name, last_reimport["steps"], start_at=st["failed_step"])
+            runner.submit("reimport", name, last_reimport.steps, start_at=st["failed_step"])
         except Busy as e:
             return 409, {"error": str(e), "busy": True, "job": e.status}
         return 200, {"ok": True, "name": name}
@@ -224,7 +226,21 @@ def reimport_steps(P, opts):
             ("比對", compare)]
 
 
-last_reimport = {}   # 最近一次重新扒譜的 {project, steps}，失敗重試時沿用同一組步驟（保有舊 AI 譜快照的狀態）
+class _LastReimport:
+    """最近一次重新扒譜的專案名稱與步驟組。
+
+    步驟組閉包裡存著舊 AI 譜快照的狀態，失敗重試時必須沿用同一組，所以要記住。
+    生命週期：每次送出重新扒譜就整組覆蓋；只存在這個伺服器行程的記憶體，重啟即消失
+    （重啟後的失敗重試資訊不持久化，是已知的暫不處理項目）。只有 reimport_project 寫入、retry_project 讀取。
+    """
+    project = None
+    steps = None
+
+    def set(self, project, steps):
+        self.project, self.steps = project, steps
+
+
+last_reimport = _LastReimport()
 
 
 def reimport_project(name):
@@ -236,7 +252,7 @@ def reimport_project(name):
         runner.submit("reimport", P.name, steps)
     except Busy as e:
         return 409, {"error": str(e), "busy": True, "job": e.status}
-    last_reimport.update(project=P.name, steps=steps)
+    last_reimport.set(P.name, steps)
     return 200, {"ok": True, "name": P.name}
 
 
@@ -244,11 +260,12 @@ def project_list():
     st = runner.status()
     out = []
     for d in sorted(p for p in PROJECTS_ROOT.iterdir() if p.is_dir() and not p.name.startswith(("_", "."))):
-        mine = st.get("project") == d.name and st.get("kind") == "import"
+        on_me = st.get("project") == d.name
+        mine = on_me and st.get("kind") == "import"
         item = {"name": d.name, "status": "ready", "error": None}
-        if st.get("project") == d.name and st.get("kind") == "reimport" and st["state"] == "error":
+        if on_me and st.get("kind") == "reimport" and st["state"] == "error":
             item.update(reimport_error=st["error"], reimport_failed_step=st["steps"][st["failed_step"]])
-        if mine and st["state"] == "running":
+        if on_me and st["state"] == "running" and st.get("kind") in ("import", "reimport"):
             item.update(status="running", step=st["step"], progress=st["progress"])
         elif mine and st["state"] == "error":
             item.update(status="failed", error=st["error"], failed_step=st["steps"][st["failed_step"]])
@@ -279,7 +296,7 @@ DIFF_SEC = 0.1      # 新舊 AI 譜小節起點差超過這個秒數就算對不
 
 
 def list_versions(P):
-    out = [{"id": AI, "name": "AI 譜", "kind": "ai", "source": None, "created": None}]
+    out = [{"id": AI, "name": AI_NAME, "kind": "ai", "source": None, "created": None}]
     metas, olds = [], []
     for f in (P / "versions").glob("*.json"):
         m = json.loads(f.read_text(encoding="utf-8")).get("meta", {})
@@ -325,11 +342,32 @@ def require_editable(P, vid):
         raise HttpError(403, "舊 AI 譜是唯讀的，不能存檔、改名或刪除；可以從它複製新版本")
 
 
-def rename_version(P, vid, name):
-    require_editable(P, vid)
+AI_NAME = "AI 譜"
+
+
+def version_name(score, vid):
+    """版本的顯示名稱（也是輸出檔名的來源）。"""
+    return AI_NAME if vid == AI else score.get("meta", {}).get("name", vid)
+
+
+def check_version_name(P, name, exclude=None):
+    """版本名稱：不能空白，也不能跟同專案其他版本（含保留的「AI 譜」）重複，
+    包含轉成檔名後會撞檔的名稱（輸出檔以名稱命名，撞名會互相覆蓋）。回傳去頭尾空白的名稱。"""
     name = (name or "").strip()
     if not name:
         raise HttpError(400, "版本名稱不能空白")
+    taken = {filename_key(AI_NAME)}
+    for f in (P / "versions").glob("*.json"):
+        if f.stem != exclude:
+            taken.add(filename_key(version_name(json.loads(f.read_text(encoding="utf-8")), f.stem)))
+    if filename_key(name) in taken:
+        raise HttpError(409, f"版本名稱「{name}」跟其他版本重複（或輸出檔名會相同），請換一個名稱")
+    return name
+
+
+def rename_version(P, vid, name):
+    require_editable(P, vid)
+    name = check_version_name(P, name, exclude=vid)
     f = version_file(P, vid)
     d = json.loads(f.read_text(encoding="utf-8"))
     d.setdefault("meta", {})["name"] = name
@@ -357,9 +395,7 @@ def restore_bar(P, vid, i):
 
 
 def create_version(P, name, source):
-    name = (name or "").strip()
-    if not name:
-        raise HttpError(400, "版本名稱不能空白")
+    name = check_version_name(P, name)
     score = read_version(P, source)
     score.pop("meta", None)
     vid = uuid.uuid4().hex[:8]
@@ -370,9 +406,12 @@ def create_version(P, name, source):
     return {"id": vid, "name": name, "kind": "edited", "source": source, "created": meta["created"]}
 
 
+ACT_FPS = 100   # ADTOF 機率曲線的幀率（幀/秒）
+
+
 def window_max(col, t, half):
-    """機率曲線（100 幀/秒）在 t±half 秒窗內的最大值。"""
-    return float(col[max(0, int((t - half) * 100)):int((t + half) * 100) + 1].max(initial=0))
+    """機率曲線在 t±half 秒窗內的最大值。"""
+    return float(col[max(0, int((t - half) * ACT_FPS)):int((t + half) * ACT_FPS) + 1].max(initial=0))
 
 
 def bar_activations(P, score):
@@ -414,25 +453,6 @@ def normalize(score):
             idx += 1
         b["events"] = evs
     return score
-
-
-def render_line_png(bars, first_no, highlight):
-    measures = [{"kind": "bar", "no": first_no + k, "ticks": b["ticks"],
-                 "events": [{**e, "idx": k * 1000 + j} for j, e in enumerate(b["events"])]}
-                for k, b in enumerate(bars)]
-    img, _ = renderer.render_line(measures, show_header=False)
-    if highlight is not None and 0 <= highlight < len(bars):
-        L = renderer.L
-        x0 = L.margin_l + 8 + L.clef_w
-        bar_w = (L.width - L.margin_r - x0) / L.bars_per_line
-        a = np.array(img).astype(np.int32)
-        xa, xb = int(x0 + highlight * bar_w) + 3, int(x0 + (highlight + 1) * bar_w) - 3
-        a[:, xa:xb] = a[:, xa:xb] * np.array([255, 246, 200]) // 255
-        from PIL import Image
-        img = Image.fromarray(a.astype(np.uint8))
-    buf = io.BytesIO()
-    img.save(buf, "PNG")
-    return buf.getvalue()
 
 
 def preview_line(body):
@@ -561,10 +581,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, list_versions(project(q["p"])))
             if u.path == "/api/restore_bar":
                 return self._send(200, restore_bar(project(q["p"]), q["v"], int(q["i"])))
-            if u.path == "/api/auto_bar":
-                P = project(q["p"])
-                bars = json.loads((P / "score.json").read_text(encoding="utf-8"))["bars"]
-                return self._send(200, bars[int(q["i"])])
             if u.path == "/api/job":
                 return self._send(200, runner.status())
             m = re.fullmatch(r"/media/([^/]+)/([\w.]+)", u.path)
@@ -611,7 +627,7 @@ class Handler(BaseHTTPRequestHandler):
                     raise HttpError(400, "format 必須是 pdf 或 png")
                 vid = body.get("version", AI)
                 score = read_version(P, vid)
-                name = "AI 譜" if vid == AI else score.get("meta", {}).get("name", vid)
+                name = version_name(score, vid)
                 return self._send(200, sheet_export.export_sheet(
                     P, score, dc.display_measures, name, body["format"], body.get("simile", True)))
             if u.path == "/api/open_exports":
@@ -626,16 +642,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"ok": True})
             if u.path == "/api/preview_line":
                 return self._send(200, preview_line(self._body()))
-            if u.path == "/api/line":
-                body = self._body()
-                png = render_line_png(body["bars"], body["first_no"], body.get("highlight"))
-                return self._send(200, {"png": base64.b64encode(png).decode()})
             if u.path == "/api/render":
                 P = project(q["p"])
                 vid = q.get("v", AI)
                 body = self._body()
                 score = read_version(P, vid)   # 送出當下的鼓譜；render 讀快照，之後再改版本不影響
-                name = "AI 譜" if vid == AI else score.get("meta", {}).get("name", vid)
+                name = version_name(score, vid)
                 steps, out, discard = render_steps(PROJECTS_ROOT, P, name, score,
                                                    float(body.get("crop_y", 0.5)), body.get("simile", True))
                 try:
