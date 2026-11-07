@@ -11,10 +11,19 @@ Crash 用 ⊗ 加重音、三連音括號、與前一小節相同用 %、連續 
 
 ## 程式位置
 
-- `tools/drumcover.py`：CLI，子指令 `download / analyze / score / render / all`
+- `tools/drumcover.py`：CLI，子指令 `download / analyze（= separate + transcribe）/ score / render / all`
 - `tools/notation.py`：鼓譜排版器（PIL 手繪）
 - `tools/evaluate.py`、`tools/gt_tools.py`：驗證用（見 drum-score-validate skill）
 - 中間檔與成品都在 `projects/<name>/`；一律用專案 venv：`.venv/Scripts/python.exe`
+
+## 也可以用操作介面（不經過 Claude）
+
+使用者想自己操作時，可以雙擊根目錄的 `啟動操作介面.bat`（或 `.venv/Scripts/python.exe tools/editor/server.py --open`），
+開啟首頁專案清單：貼上 YouTube 網址或本機 mp4 路徑 → 名稱預設用影片標題（可改、可用中文）→ 「新增並開始扒譜」。
+伺服器會在背景依序跑 下載 → 分離鼓聲 → 扒譜 → 排版（對應 CLI 的 `download / separate / transcribe / score`），
+首頁顯示進度；失敗時顯示錯誤，可以從失敗那一步重試，前面步驟的中間檔沿用。
+進階選項（預設收起）：開始秒數、長度（裁切影片，只在下載步驟生效）、扒譜音源。
+完成後可進入編輯畫面改譜、輸出練習影片或鼓譜圖檔。使用者要的是這種互動方式時，引導他用介面即可，不用代跑 CLI。
 
 ## 步驟
 

@@ -81,7 +81,7 @@ dialog .row { justify-content: flex-end; }
 </head>
 <body>
 <header>
-  <h1>🥁 鼓譜編輯器</h1>
+  <h1><a href="/" style="color:inherit;text-decoration:none" title="回到專案清單">🥁 鼓譜編輯器</a></h1>
   <select id="proj"></select>
   <select id="ver" title="版本"></select>
   <button id="verCopyBtn" title="從目前這份鼓譜複製出新的編輯版本">複製版本</button>
@@ -219,7 +219,7 @@ async function api(path, body) {
 }
 async function loadProjects() {
   const names = await api("/api/projects");
-  $("proj").innerHTML = names.map(n => `<option>${n}</option>`).join("");
+  $("proj").innerHTML = names.map(n => `<option value="${n.replace(/"/g, "&quot;")}">${n.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</option>`).join("");
   const want = new URLSearchParams(location.search).get("p") || localStorage.getItem("dce.proj");
   if (want && names.includes(want)) $("proj").value = want;
   await loadProject($("proj").value, "ai", true);
@@ -273,8 +273,8 @@ async function loadProject(name, vid = "ai", force = false) {
   $("verRenameBtn").disabled = $("verDelBtn").disabled = vid === "ai";
   act = d.act; undoStack = []; redoStack = []; setDirty(false);
   try { localStorage.setItem("dce.proj", name); } catch (e) {}
-  $("vid").src = d.media.includes("video.mp4") ? `/media/${P}/video.mp4` : "";
-  $("aud").src = d.media.includes("drums.wav") ? `/media/${P}/drums.wav` : "";
+  $("vid").src = d.media.includes("video.mp4") ? `/media/${encodeURIComponent(P)}/video.mp4` : "";
+  $("aud").src = d.media.includes("drums.wav") ? `/media/${encodeURIComponent(P)}/drums.wav` : "";
   $("srcSel").querySelector('[value=drums]').disabled = !d.media.includes("drums.wav");
   cur = Math.min(cur, score.bars.length - 1);
   if (name !== $("proj").dataset.last) cur = 0;

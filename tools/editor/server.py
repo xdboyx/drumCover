@@ -8,14 +8,17 @@ import base64
 import io
 import json
 import re
+import shutil
 import sys
 import threading
 import uuid
 from datetime import datetime
 import webbrowser
+import importlib.util
+import os
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, unquote
 
 import numpy as np
 
@@ -30,6 +33,7 @@ from jobs import JobRunner, Busy            # noqa: E402
 from render_job import render_steps         # noqa: E402
 from notation import LineRenderer, Layout   # noqa: E402
 import sheet_export                          # noqa: E402
+import pipeline as real_pipeline            # noqa: E402
 
 # 編輯器的樂器列 -> ADTOF 類別（用來顯示模型信心）
 ACT_CLASS = {"CR": "CY", "RD": "CY", "HH": "HH", "HO": "HH", "SD": "SD", "XS": "SD",
@@ -43,17 +47,137 @@ act_cache = {}
 runner = JobRunner()   # 整個伺服器唯一的長時間工作執行器
 
 
-def project(name):
-    p = PROJECTS_ROOT / name
-    if not re.fullmatch(r"[\w\-]+", name) or not (p / "score.json").exists():
-        raise FileNotFoundError(name)
-    return p
-
-
 class HttpError(Exception):
     def __init__(self, code, msg):
         super().__init__(msg)
         self.code, self.msg = code, msg
+
+
+RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+AUDIO_SOURCES = ("drums", "mix", "max", "hybrid")
+
+
+def check_name(name):
+    """專案名稱：接受中文、空白等常見 YouTube 標題字元，擋掉 Windows 不允許的字元、路徑跳脫與保留字。回傳去頭尾空白的名稱。"""
+    name = name.strip() if isinstance(name, str) else ""
+    if not name:
+        raise HttpError(400, "專案名稱不能空白")
+    if len(name) > 80:
+        raise HttpError(400, "專案名稱太長（最多 80 字）")
+    if re.search(r'[<>:"/\\|?*\x00-\x1f]', name):
+        raise HttpError(400, '專案名稱不能包含 < > : " / \\ | ? * 這些字元')
+    if name.endswith(".") or name.split(".")[0].strip().upper() in RESERVED_NAMES:
+        raise HttpError(400, "專案名稱不合法（不能以 . 結尾，也不能用 Windows 保留字）")
+    return name
+
+
+def project_dir(name):
+    """專案資料夾（不要求已經有 score.json，扒譜中或失敗的專案也找得到）。"""
+    try:
+        ok = check_name(name) == name
+    except HttpError:
+        ok = False
+    p = PROJECTS_ROOT / name
+    if not ok or not p.is_dir():
+        raise FileNotFoundError(name)
+    return p
+
+
+def project(name):
+    p = project_dir(name)
+    if not (p / "score.json").exists():
+        raise FileNotFoundError(name)
+    return p
+
+
+def pipeline():
+    """扒譜流程：預設是真的 drumcover；環境變數 DRUMCOVER_PIPELINE 可指到另一個 .py（測試用假流程）。"""
+    path = os.environ.get("DRUMCOVER_PIPELINE")
+    if not path:
+        return real_pipeline
+    spec = importlib.util.spec_from_file_location("drumcover_fake_pipeline", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def clean_source(source):
+    source = (source or "").strip().strip('"').strip()
+    if Path(source).is_file() and source.lower().endswith(".mp4"):
+        return source
+    if re.match(r"https?://", source, re.I):
+        return source
+    raise HttpError(400, "請輸入 YouTube 網址或本機 mp4 的完整路徑")
+
+
+def import_steps(P, source, opts):
+    """新增專案的扒譜步驟：下載 → 分離鼓聲 → 扒譜 → 排版。"""
+    pl = pipeline()
+    return [
+        ("下載", lambda report: pl.download(P, source, opts, report)),
+        ("分離鼓聲", lambda report: pl.separate(P, opts, report)),
+        ("扒譜", lambda report: pl.transcribe(P, opts, report)),
+        ("排版", lambda report: pl.score(P, opts, report)),
+    ]
+
+
+def submit_import(P, source, opts, start_at=0):
+    """送出扒譜工作；忙碌時回傳 409。"""
+    try:
+        runner.submit("import", P.name, import_steps(P, source, opts), start_at=start_at)
+    except Busy as e:
+        return 409, {"error": str(e), "busy": True, "job": e.status}
+    return 200, {"ok": True, "name": P.name}
+
+
+def new_project(body):
+    name = check_name(body.get("name"))
+    source = clean_source(body.get("source"))
+    audio = body.get("audio") or None
+    if audio is not None and audio not in AUDIO_SOURCES:
+        raise HttpError(400, f"扒譜音源必須是 {'/'.join(AUDIO_SOURCES)}")
+    try:
+        opts = {"start": max(0.0, float(body.get("start") or 0)), "dur": max(0.0, float(body.get("dur") or 0)),
+                "audio": audio}
+    except (TypeError, ValueError):
+        raise HttpError(400, "開始秒數與長度必須是數字")
+    P = PROJECTS_ROOT / name
+    if P.exists():
+        raise HttpError(409, f"專案「{name}」已存在，請換一個名稱")
+    P.mkdir(parents=True)
+    (P / "import.json").write_text(json.dumps({"source": source, "opts": opts}, ensure_ascii=False), encoding="utf-8")
+    code, resp = submit_import(P, source, opts)
+    if code != 200:
+        shutil.rmtree(P, ignore_errors=True)
+    return code, resp
+
+
+def retry_project(name):
+    """新增專案的扒譜失敗後重試：從失敗那一步開始，前面各步的中間檔沿用。"""
+    P = project_dir(name)
+    f = P / "import.json"
+    if not f.exists() or (P / "score.json").exists():
+        raise HttpError(400, "這個專案不是扒譜失敗的專案，不能重試")
+    d = json.loads(f.read_text(encoding="utf-8"))
+    st = runner.status()
+    failed_here = st.get("state") == "error" and st.get("project") == name and st.get("kind") == "import"
+    return submit_import(P, d["source"], d["opts"], st["failed_step"] if failed_here else 0)
+
+
+def project_list():
+    st = runner.status()
+    out = []
+    for d in sorted(p for p in PROJECTS_ROOT.iterdir() if p.is_dir() and not p.name.startswith(("_", "."))):
+        mine = st.get("project") == d.name and st.get("kind") == "import"
+        item = {"name": d.name, "status": "ready", "error": None}
+        if mine and st["state"] == "running":
+            item.update(status="running", step=st["step"], progress=st["progress"])
+        elif mine and st["state"] == "error":
+            item.update(status="failed", error=st["error"], failed_step=st["steps"][st["failed_step"]])
+        elif not (d / "score.json").exists():
+            item.update(status="failed", error="上次扒譜沒有完成（可以重試）")
+        out.append(item)
+    return out
 
 
 AI = "ai"   # AI 譜（score.json）的版本 id，唯讀
@@ -258,8 +382,19 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
         try:
-            if u.path in ("/", "/index.html"):
+            if u.path in ("/", "/home.html"):
+                return self._send(200, (HERE / "home.html").read_bytes(), "text/html; charset=utf-8")
+            if u.path in ("/editor", "/index.html"):
                 return self._send(200, (HERE / "index.html").read_bytes(), "text/html; charset=utf-8")
+            if u.path == "/api/project_list":
+                return self._send(200, project_list())
+            if u.path == "/api/project_title":
+                src = clean_source(q.get("source"))
+                try:
+                    title = Path(src).stem if Path(src).is_file() else pipeline().title(src)
+                except RuntimeError as e:
+                    raise HttpError(502, str(e))
+                return self._send(200, {"title": title})
             if u.path == "/api/projects":
                 names = sorted(p.parent.name for p in PROJECTS_ROOT.glob("*/score.json"))
                 return self._send(200, names)
@@ -279,9 +414,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, bars[int(q["i"])])
             if u.path == "/api/job":
                 return self._send(200, runner.status())
-            m = re.fullmatch(r"/media/([\w\-]+)/([\w.]+)", u.path)
+            m = re.fullmatch(r"/media/([^/]+)/([\w.]+)", u.path)
             if m and m.group(2) in MEDIA:
-                P = project(m.group(1))
+                P = project(unquote(m.group(1)))
                 return self._media(P / m.group(2))
             self._send(404, {"error": "not found"})
         except FileNotFoundError as e:
@@ -293,6 +428,10 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
         try:
+            if u.path == "/api/projects/new":
+                return self._send(*new_project(self._body()))
+            if u.path == "/api/projects/retry":
+                return self._send(*retry_project(q.get("p")))
             if u.path == "/api/score":
                 P = project(q["p"])
                 vid = q.get("v", AI)

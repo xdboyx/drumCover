@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>鼓譜 · 專案清單</title>
+<style>
+:root {
+  --bg: #f4f2ee; --panel: #ffffff; --ink: #1d1b18; --muted: #7a746b; --line: #e3ded6;
+  --accent: #2563eb; --accent-soft: #dbe6fd; --warn: #e8890c; --warn-soft: #fdebd0;
+  --ok: #1f9d55; --ok-soft: #d6f2e1; --err: #c62828; --err-soft: #fde3e3;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 "Segoe UI", "Microsoft JhengHei", system-ui, sans-serif; }
+header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+header h1 { font-size: 16px; margin: 0; font-weight: 700; letter-spacing: .5px; }
+main { padding: 14px 16px 40px; display: grid; gap: 14px; max-width: 900px; margin: 0 auto; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.card h2 { font-size: 13px; color: var(--muted); font-weight: 600; margin: 0 0 8px; letter-spacing: .3px; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.grow { flex: 1; }
+input[type=text], input[type=number], select { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); }
+input[type=text] { width: 100%; }
+input[type=number] { width: 90px; }
+button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: 5px 11px; border-radius: 7px; cursor: pointer; white-space: nowrap; }
+button:hover { border-color: #c9c2b7; background: #faf8f5; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button:disabled { opacity: .45; cursor: default; }
+label { display: grid; gap: 3px; font-size: 12px; color: var(--muted); }
+.field { display: grid; gap: 10px; }
+details summary { cursor: pointer; color: var(--muted); }
+.adv { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; }
+.hint { color: var(--muted); font-size: 12px; }
+.err { color: var(--err); font-size: 13px; }
+.proj { display: flex; align-items: center; gap: 10px; padding: 10px 4px; border-top: 1px solid var(--line); }
+.proj:first-child { border-top: 0; }
+.proj .name { font-weight: 600; font-size: 15px; }
+.badge { font-size: 12px; padding: 1px 8px; border-radius: 10px; }
+.badge.running { background: var(--accent-soft); color: var(--accent); }
+.badge.failed { background: var(--err-soft); color: var(--err); }
+.msg { font: 12px Consolas, monospace; color: var(--err); white-space: pre-wrap; max-height: 5em; overflow: auto; }
+a.open { text-decoration: none; }
+#toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: #1d1b18; color: #fff; padding: 8px 16px; border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+#toast.show { opacity: .92; }
+</style>
+</head>
+<body>
+<header><h1>🥁 鼓譜 · 專案清單</h1></header>
+<main>
+  <section class="card">
+    <h2>新增專案</h2>
+    <div class="field">
+      <label>YouTube 網址或本機 mp4 路徑
+        <div class="row">
+          <input type="text" id="src" class="grow" placeholder="https://www.youtube.com/watch?v=… 或 C:\影片\練習.mp4" autocomplete="off">
+          <button id="titleBtn" title="先取得影片標題當作專案名稱">取得標題</button>
+        </div>
+      </label>
+      <label>專案名稱（預設用影片標題，可以改）
+        <input type="text" id="name" maxlength="80" autocomplete="off">
+      </label>
+      <details>
+        <summary>進階選項</summary>
+        <div class="adv">
+          <label>開始秒數<input type="number" id="start" min="0" step="0.1" placeholder="0"></label>
+          <label>長度（秒，空白＝到最後）<input type="number" id="dur" min="0" step="0.1" placeholder="全部"></label>
+          <label>扒譜音源
+            <select id="audio">
+              <option value="">混合（預設）</option>
+              <option value="drums">只用分離後的鼓聲</option>
+              <option value="mix">只用完整混音</option>
+              <option value="max">兩者逐幀取大</option>
+            </select>
+          </label>
+        </div>
+      </details>
+      <div class="row"><button id="addBtn" class="primary">新增並開始扒譜</button><span id="addErr" class="err"></span></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>專案</h2>
+    <div id="list"><span class="hint">載入中…</span></div>
+  </section>
+</main>
+<div id="toast"></div>
+<script>
+const $ = id => document.getElementById(id);
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+let nameTouched = false, titleSeq = 0, busy = false;
+
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error || r.statusText);
+  return d;
+}
+function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2500); }
+
+async function fetchTitle() {
+  const src = $("src").value.trim();
+  if (!src) return;
+  const seq = ++titleSeq;
+  try {
+    const d = await api("/api/project_title?source=" + encodeURIComponent(src));
+    if (seq === titleSeq && !nameTouched) $("name").value = d.title.replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").trim().slice(0, 80);
+    $("addErr").textContent = "";
+  } catch (e) { if (seq === titleSeq) $("addErr").textContent = e.message; }
+}
+$("name").addEventListener("input", () => { nameTouched = true; });
+$("src").addEventListener("input", () => { nameTouched = false; });
+$("src").addEventListener("change", fetchTitle);   // 貼上網址離開輸入框時自動取得標題
+$("titleBtn").addEventListener("click", () => { nameTouched = false; fetchTitle(); });
+
+$("addBtn").addEventListener("click", async () => {
+  $("addErr").textContent = "";
+  try {
+    await api("/api/projects/new", {
+      source: $("src").value, name: $("name").value,
+      start: $("start").value || 0, dur: $("dur").value || 0, audio: $("audio").value || null,
+    });
+    $("src").value = $("name").value = ""; nameTouched = false;
+    toast("已開始扒譜");
+  } catch (e) { $("addErr").textContent = e.message; }
+  refresh();
+});
+
+async function retry(name) {
+  try { await api("/api/projects/retry?p=" + encodeURIComponent(name), {}); } catch (e) { toast(e.message); }
+  refresh();
+}
+
+let timer = null;
+async function refresh() {
+  clearTimeout(timer);
+  let list;
+  try { list = await api("/api/project_list"); } catch (e) { toast("載入失敗：" + e.message); return; }
+  const job = await api("/api/job");
+  busy = job.state === "running";
+  $("addBtn").disabled = busy;
+  $("addBtn").title = busy ? "有工作正在執行，請等它結束再新增" : "";
+  if (busy && !$("addErr").textContent) $("addErr").textContent = "有工作正在執行（" + (job.project || "") + "），完成後才能新增";
+  else if (!busy && $("addErr").textContent.startsWith("有工作正在執行")) $("addErr").textContent = "";
+  $("list").innerHTML = list.length ? list.map(p => {
+    let badge = "", body = "";
+    if (p.status === "running") {
+      const j = job, steps = j.steps || [];
+      const stepsHtml = steps.map((s, i) => i < j.step_index ? `✓${esc(s)}` : (i === j.step_index ? `<b>▶${esc(s)} ${Math.round((j.progress || 0) * 100)}%</b>` : esc(s))).join(" → ");
+      badge = `<span class="badge running">扒譜中</span>`;
+      body = `<div class="hint">${stepsHtml}</div>`;
+    } else if (p.status === "failed") {
+      badge = `<span class="badge failed">失敗</span>`;
+      body = `<div class="msg">${p.failed_step ? "失敗步驟：" + esc(p.failed_step) + "\n" : ""}${esc(p.error || "")}</div>`;
+    }
+    const act = p.status === "ready" ? `<a class="open" href="/editor?p=${encodeURIComponent(p.name)}"><button class="primary">開啟</button></a>`
+      : p.status === "failed" ? `<button data-retry="${esc(p.name)}" ${busy ? "disabled" : ""}>${p.failed_step ? "從「" + esc(p.failed_step) + "」重試" : "重試"}</button>` : "";
+    return `<div class="proj"><div class="grow"><span class="name">${esc(p.name)}</span> ${badge}${body}</div>${act}</div>`;
+  }).join("") : `<span class="hint">還沒有專案，從上面貼一個 YouTube 網址開始。</span>`;
+  for (const b of $("list").querySelectorAll("[data-retry]")) b.addEventListener("click", () => retry(b.dataset.retry));
+  timer = setTimeout(refresh, busy ? 1000 : 4000);
+}
+refresh();
+</script>
+</body>
+</html>
