@@ -352,6 +352,11 @@ def create_version(P, name, source):
     return {"id": vid, "name": name, "kind": "edited", "source": source, "created": meta["created"]}
 
 
+def window_max(col, t, half):
+    """機率曲線（100 幀/秒）在 t±half 秒窗內的最大值。"""
+    return float(col[max(0, int((t - half) * 100)):int((t + half) * 100) + 1].max(initial=0))
+
+
 def bar_activations(P, score):
     """每小節每個 ADTOF 類別在每個 16 分格（16 格）與三連音格（12 格）的最大擊打機率。"""
     key = (str(P), score.get("offset_ms"), len(score["bars"]))
@@ -364,20 +369,16 @@ def bar_activations(P, score):
     off = (score.get("offset_ms") or 0) / 1000
     out = []
     for b in score["bars"]:
-        bt = b.get("beats") or list(np.linspace(b["t0"], b["t1"], 5))
+        beats = b.get("beats") or list(np.linspace(b["t0"], b["t1"], 5))
+        spans = list(zip(beats[:-1], beats[1:]))   # 每拍 (起, 止)
         row = {}
         for c, cls in enumerate(dc.ACT_CLASSES):
-            s16, t3 = [], []
-            for j in range(len(bt) - 1):
-                dur = bt[j + 1] - bt[j]
-                for k, n, half in [(k, 4, dur / 8) for k in range(4)]:
-                    t = bt[j] + dur * k / n + off
-                    s16.append(float(act[max(0, int((t - half) * 100)):int((t + half) * 100) + 1, c].max(initial=0)))
-                for k in range(3):
-                    t = bt[j] + dur * k / 3 + off
-                    half = dur / 6
-                    t3.append(float(act[max(0, int((t - half) * 100)):int((t + half) * 100) + 1, c].max(initial=0)))
-            row[cls] = {"s16": [round(v, 3) for v in s16], "t3": [round(v, 3) for v in t3]}
+            row[cls] = {
+                "s16": [round(window_max(act[:, c], t0 + (t1 - t0) * k / 4 + off, (t1 - t0) / 8), 3)
+                        for t0, t1 in spans for k in range(4)],
+                "t3": [round(window_max(act[:, c], t0 + (t1 - t0) * k / 3 + off, (t1 - t0) / 6), 3)
+                       for t0, t1 in spans for k in range(3)],
+            }
         out.append(row)
     act_cache[key] = out
     return out

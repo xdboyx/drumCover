@@ -721,23 +721,19 @@ function scheduleSynth(p) {
 function tick() {
   if (!playing) return;
   const p = player(), b = bar(), t = p.currentTime;
-  if (!sync && !p.paused && t > 0) {   // 第一個實際播放的畫格：建立媒體時間與 AudioContext 時間的對應
+  if (!sync && !p.paused && !p.seeking && p.readyState >= 3 && t > 0) {   // 第一個實際播放的畫格：建立媒體時間與 AudioContext 時間的對應
     sync = { ctx: ctx.currentTime, media: t };
     scheduleSynth(p);
   }
   // 播放頭
-  const ph = $("playhead"), bt = b.beats;
-  if (bt && t >= b.t0 && t <= b.t1) {
+  const ph = $("playhead"), bt = b.beats || Array.from({ length: b.ticks / TICKS + 1 }, (_, j) => b.t0 + (b.t1 - b.t0) * j / (b.ticks / TICKS));
+  const beatEls = $("grid").querySelectorAll(".beat");   // 前 nb 個是子拍標記列，位置與下方各列的拍一致
+  if (t >= b.t0 && t <= b.t1 && beatEls.length >= bt.length - 1) {
     let j = 0; while (j < bt.length - 2 && t >= bt[j + 1]) j++;
-    const pos = (j + (t - bt[j]) / (bt[j + 1] - bt[j])) / (bt.length - 1);
-    const g = $("grid"), first = g.querySelector(".beat:nth-child(2)") ? g.children[g.children.length - 1] : null;
-    const cells = g.querySelectorAll(".cell");
-    if (cells.length) {
-      const gr = g.getBoundingClientRect();
-      const left = 150, width = gr.width - 150 - 6;
-      ph.style.left = (left + pos * width) + "px";
-      ph.style.display = "block";
-    }
+    const frac = Math.min(1, Math.max(0, (t - bt[j]) / (bt[j + 1] - bt[j])));
+    const gr = $("grid").getBoundingClientRect(), br = beatEls[j].getBoundingClientRect();
+    ph.style.left = (br.left - gr.left + frac * br.width) + "px";
+    ph.style.display = "block";
   } else ph.style.display = "none";
   if (t >= b.t1 + 0.02) {
     if ($("loopBtn").classList.contains("on")) {
@@ -758,6 +754,8 @@ function stop() {
 $("playBtn").onclick = () => playing ? stop() : play();
 $("loopBtn").onclick = () => $("loopBtn").classList.toggle("on");
 for (const id of ["srcSel", "rateSel", "modeSel"]) $(id).onchange = () => { if (playing) play(); };
+// 選完下拉選單／勾選後把焦點還給頁面，否則 ←/→/空白/L 等快捷鍵會被表單元件吃掉
+document.addEventListener("change", e => { if (e.target.matches("select, input[type=checkbox]")) e.target.blur(); });
 $("vid").addEventListener("loadedmetadata", () => { if (!playing) $("vid").currentTime = bar().t0; });
 
 // ---------------------------------------------------------------- 輸出影片
