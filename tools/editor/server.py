@@ -8,7 +8,6 @@ import base64
 import io
 import json
 import re
-import subprocess
 import sys
 import threading
 import uuid
@@ -27,6 +26,8 @@ sys.path.insert(0, str(TOOLS))
 sys.stdout.reconfigure(encoding="utf-8")
 
 import drumcover as dc                      # noqa: E402
+from jobs import JobRunner, Busy            # noqa: E402
+from render_job import render_steps         # noqa: E402
 from notation import LineRenderer, Layout   # noqa: E402
 import sheet_export                          # noqa: E402
 
@@ -39,7 +40,7 @@ PROJECTS_ROOT = ROOT / "projects"   # 可由 --projects-root 覆寫
 
 renderer = LineRenderer(Layout(width=1920, height=280))
 act_cache = {}
-renders = {}   # name -> {"proc", "log"}
+runner = JobRunner()   # 整個伺服器唯一的長時間工作執行器
 
 
 def project(name):
@@ -276,12 +277,8 @@ class Handler(BaseHTTPRequestHandler):
                 P = project(q["p"])
                 bars = json.loads((P / "score.json").read_text(encoding="utf-8"))["bars"]
                 return self._send(200, bars[int(q["i"])])
-            if u.path == "/api/render_status":
-                r = renders.get(q["p"])
-                if not r:
-                    return self._send(200, {"state": "idle"})
-                state = "running" if r["proc"].poll() is None else ("done" if r["proc"].returncode == 0 else "error")
-                return self._send(200, {"state": state, "log": r["log"][-400:]})
+            if u.path == "/api/job":
+                return self._send(200, runner.status())
             m = re.fullmatch(r"/media/([\w\-]+)/([\w.]+)", u.path)
             if m and m.group(2) in MEDIA:
                 P = project(m.group(1))
@@ -336,27 +333,17 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"png": base64.b64encode(png).decode()})
             if u.path == "/api/render":
                 P = project(q["p"])
+                vid = q.get("v", AI)
                 body = self._body()
-                r = renders.get(P.name)
-                if r and r["proc"].poll() is None:
-                    return self._send(409, {"error": "已經在輸出中"})
-                cmd = [sys.executable, str(TOOLS / "drumcover.py"), "render", P.name,
-                       "--crop-y", str(float(body.get("crop_y", 0.5)))]
-                if not body.get("simile", True):
-                    cmd.append("--no-simile")
-                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=str(ROOT))
-                rec = {"proc": proc, "log": ""}
-                renders[P.name] = rec
-
-                def pump():
-                    buf = b""
-                    while True:
-                        ch = proc.stdout.read(256)
-                        if not ch:
-                            break
-                        buf += ch
-                        rec["log"] = buf.decode("utf-8", "replace").replace("\r", "\n")
-                threading.Thread(target=pump, daemon=True).start()
+                score = read_version(P, vid)   # 送出當下的鼓譜；render 讀快照，之後再改版本不影響
+                name = "AI 譜" if vid == AI else score.get("meta", {}).get("name", vid)
+                steps, out, discard = render_steps(PROJECTS_ROOT, P, name, score,
+                                                   float(body.get("crop_y", 0.5)), body.get("simile", True))
+                try:
+                    runner.submit("render", P.name, steps, output=out.relative_to(P).as_posix())
+                except Busy as e:
+                    discard()
+                    return self._send(409, {"error": str(e), "busy": True, "job": e.status})
                 return self._send(200, {"ok": True})
             self._send(404, {"error": "not found"})
         except FileNotFoundError as e:

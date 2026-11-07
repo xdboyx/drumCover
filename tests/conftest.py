@@ -1,10 +1,12 @@
 """測試用：在暫存資料夾準備假專案，以子行程啟動編輯器伺服器，只透過 HTTP 驗證。"""
 import json
+import os
 import socket
 import subprocess
 import sys
 import time
 import urllib.request
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -33,12 +35,12 @@ def projects_root(tmp_path):
     return root
 
 
-@pytest.fixture
-def server(projects_root):
+@contextmanager
+def launch_server(projects_root, env=None):
     port = free_port()
     proc = subprocess.Popen(
         [sys.executable, str(SERVER), "--port", str(port), "--projects-root", str(projects_root)],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env={**os.environ, **(env or {})})
     base = f"http://127.0.0.1:{port}"
     try:
         for _ in range(150):
@@ -55,3 +57,9 @@ def server(projects_root):
     finally:
         proc.kill()
         proc.wait()
+
+
+@pytest.fixture
+def server(projects_root):
+    with launch_server(projects_root) as base:
+        yield base

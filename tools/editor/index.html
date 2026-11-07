@@ -271,8 +271,7 @@ async function loadProject(name, vid = "ai", force = false) {
   $("roHint").textContent = vid === "ai" ? "唯讀：點格子會先建立新版本" : "";
   $("saveBtn").disabled = vid === "ai";
   $("verRenameBtn").disabled = $("verDelBtn").disabled = vid === "ai";
-  $("renderBtn").disabled = vid !== "ai";
-  $("renderBtn").title = vid === "ai" ? "" : "目前只能輸出 AI 譜（編輯版本輸出之後支援）"; act = d.act; undoStack = []; redoStack = []; setDirty(false);
+  act = d.act; undoStack = []; redoStack = []; setDirty(false);
   try { localStorage.setItem("dce.proj", name); } catch (e) {}
   $("vid").src = d.media.includes("video.mp4") ? `/media/${P}/video.mp4` : "";
   $("aud").src = d.media.includes("drums.wav") ? `/media/${P}/drums.wav` : "";
@@ -721,10 +720,9 @@ $("vid").addEventListener("loadedmetadata", () => { if (!playing) $("vid").curre
 // ---------------------------------------------------------------- 輸出影片
 $("renderBtn").onclick = async () => {
   try {
-    if (dirty) await save();
-    await api(`/api/render?p=${P}`, { crop_y: +$("cropSel").value, simile: $("simileChk").checked });
-    $("renderBtn").disabled = true;
-    pollRender();
+    if (dirty && V !== "ai") await save();
+    await api(`/api/render?p=${encodeURIComponent(P)}&v=${encodeURIComponent(V)}`, { crop_y: +$("cropSel").value, simile: $("simileChk").checked });
+    pollJob();
   } catch (e) { toast("無法輸出：" + e.message); }
 };
 // ---------------------------------------------------------------- 輸出鼓譜圖檔
@@ -740,19 +738,24 @@ $("sheetPdfBtn").onclick = () => exportSheet("pdf");
 $("sheetPngBtn").onclick = () => exportSheet("png");
 $("openExportsBtn").onclick = () => api(`/api/open_exports?p=${encodeURIComponent(P)}`, {}).catch(e => toast("無法開啟：" + e.message));
 
-async function pollRender() {
-  const s = await api(`/api/render_status?p=${P}`);
-  const m = [...s.log.matchAll(/time=(\d+):(\d+):([\d.]+)/g)].pop();
-  const done = m ? (+m[1] * 3600 + +m[2] * 60 + +m[3]) : 0;
-  if (s.state === "running") {
-    $("renderState").textContent = `輸出中… ${fmt(done)}`;
-    setTimeout(pollRender, 1000);
+// 工作狀態在伺服器端；重開分頁時也會從這裡接回進度
+let jobTimer = null;
+async function pollJob() {
+  clearTimeout(jobTimer);
+  const s = await api("/api/job");
+  const busy = s.state === "running";
+  $("renderBtn").disabled = busy;
+  $("renderBtn").title = busy ? "有工作正在執行，請等它結束" : "";
+  if (busy) {
+    const pct = Math.round((s.progress || 0) * 100);
+    $("renderState").textContent = `${s.kind === "render" ? "輸出中" : "執行中"}（${s.project}）${s.step || ""} ${pct}%`;
+    jobTimer = setTimeout(pollJob, 1000);
   } else {
-    $("renderBtn").disabled = V !== "ai";
-    $("renderState").textContent = s.state === "done" ? `完成：projects/${P}/out.mp4` : (s.state === "error" ? "輸出失敗" : "");
-    $("renderLog").textContent = s.state === "error" ? s.log.slice(-300) : "";
+    $("renderState").textContent = s.state === "done" ? `完成：projects/${s.project}/${s.output}` : (s.state === "error" ? "輸出失敗" : "");
+    $("renderLog").textContent = s.state === "error" ? s.error : "";
   }
 }
+pollJob();
 
 // ---------------------------------------------------------------- 快捷鍵
 document.addEventListener("keydown", e => {

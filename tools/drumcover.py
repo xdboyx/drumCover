@@ -12,6 +12,7 @@
 import argparse
 import json
 import math
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -19,6 +20,7 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
+PROJECTS = ROOT / "projects"   # 可由 --projects-root 覆寫
 sys.stdout.reconfigure(encoding="utf-8")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -29,7 +31,7 @@ def ffmpeg_exe():
 
 
 def proj(name):
-    p = ROOT / "projects" / name
+    p = PROJECTS / name
     p.mkdir(parents=True, exist_ok=True)
     return p
 
@@ -534,7 +536,7 @@ def video_fps(path):
 def cmd_render(a):
     from notation import LineRenderer, Layout, render_cursor
     P = proj(a.name)
-    score = json.loads((P / "score.json").read_text(encoding="utf-8"))
+    score = json.loads(Path(a.score or P / "score.json").read_text(encoding="utf-8"))
     W, H = 1920, 1080
     strip_h = a.strip_h
     top_h = H - strip_h
@@ -577,6 +579,8 @@ def cmd_render(a):
         if cur is not None and t >= t0 - 0.01:
             render_cursor(frame, cur, layout=L)
         proc.stdin.write(frame.tobytes())
+        if f % 10 == 0:
+            print(f"PROGRESS {f}/{n_frames}", flush=True)
     proc.stdin.close()
     proc.wait()
     print("render ->", out)
@@ -590,14 +594,19 @@ def main():
     ap.add_argument("--url")
     ap.add_argument("--start", type=float, default=0)
     ap.add_argument("--dur", type=float, default=0)
-    ap.add_argument("--out")
+    ap.add_argument("--out", help="輸出路徑（相對路徑以專案資料夾為基準，也可給絕對路徑）")
+    ap.add_argument("--score", help="render 讀這份鼓譜檔（預設專案的 score.json）")
+    ap.add_argument("--projects-root", type=Path, help="專案根目錄（預設 projects/）")
     ap.add_argument("--strip-h", type=int, default=280)
     ap.add_argument("--crop-y", type=float, default=0.5, help="畫面上下裁切位置 0=保留頂部 1=保留底部")
     ap.add_argument("--lead", type=float, default=0.0, help="游標提早量（秒）")
-    ap.add_argument("--codec", default="h264_nvenc")
+    ap.add_argument("--codec", default=os.environ.get("DRUMCOVER_CODEC", "h264_nvenc"))
     ap.add_argument("--no-simile", action="store_true", help="不使用 % 反覆記號，每小節都寫出來")
     ap.add_argument("--source", default="hybrid", choices=["drums", "mix", "max", "hybrid"], help="ADTOF 機率來源")
     a = ap.parse_args()
+    if a.projects_root:
+        global PROJECTS
+        PROJECTS = a.projects_root.resolve()
     if a.cmd in ("download", "all"):
         cmd_download(a)
     if a.cmd in ("analyze", "all"):
