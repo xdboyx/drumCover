@@ -79,7 +79,46 @@ def list_versions(P):
         metas.append({"id": f.stem, "name": m.get("name", f.stem), "kind": "edited",
                       "source": m.get("source"), "created": m.get("created")})
     out += sorted(metas, key=lambda v: (v["created"] or "", v["id"]))
+    ids = {v["id"] for v in out}
+    for v in out:
+        v["source_deleted"] = bool(v["source"]) and v["source"] not in ids
     return out
+
+
+def require_editable(vid):
+    if vid == AI:
+        raise HttpError(403, "AI 譜不能改名或刪除")
+
+
+def rename_version(P, vid, name):
+    require_editable(vid)
+    name = (name or "").strip()
+    if not name:
+        raise HttpError(400, "版本名稱不能空白")
+    f = version_file(P, vid)
+    d = json.loads(f.read_text(encoding="utf-8"))
+    d.setdefault("meta", {})["name"] = name
+    f.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+    return {"id": vid, "name": name}
+
+
+def delete_version(P, vid):
+    require_editable(vid)
+    version_file(P, vid).unlink()
+
+
+def restore_bar(P, vid, i):
+    """某小節「還原成來源版本」：來源存在取來源的，否則取 AI 譜的。只回傳內容，不改檔。"""
+    if vid == AI:
+        raise HttpError(403, "AI 譜沒有來源版本")
+    src = read_version(P, vid).get("meta", {}).get("source") or AI
+    try:
+        bars = read_version(P, src)["bars"]
+    except FileNotFoundError:
+        bars = read_version(P, AI)["bars"]
+    if not 0 <= i < len(bars):
+        raise FileNotFoundError(f"小節 {i}")
+    return bars[i]
 
 
 def create_version(P, name, source):
@@ -231,6 +270,8 @@ class Handler(BaseHTTPRequestHandler):
                                         "media": [m for m in MEDIA if (P / m).exists()]})
             if u.path == "/api/versions":
                 return self._send(200, list_versions(project(q["p"])))
+            if u.path == "/api/restore_bar":
+                return self._send(200, restore_bar(project(q["p"]), q["v"], int(q["i"])))
             if u.path == "/api/auto_bar":
                 P = project(q["p"])
                 bars = json.loads((P / "score.json").read_text(encoding="utf-8"))["bars"]
@@ -265,6 +306,11 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/api/versions":
                 body = self._body()
                 return self._send(200, create_version(project(q["p"]), body.get("name"), body.get("source", AI)))
+            if u.path == "/api/version/rename":
+                return self._send(200, rename_version(project(q["p"]), q["v"], self._body().get("name")))
+            if u.path == "/api/version/delete":
+                delete_version(project(q["p"]), q["v"])
+                return self._send(200, {"ok": True})
             if u.path == "/api/line":
                 body = self._body()
                 png = render_line_png(body["bars"], body["first_no"], body.get("highlight"))

@@ -84,6 +84,9 @@ dialog .row { justify-content: flex-end; }
   <h1>🥁 鼓譜編輯器</h1>
   <select id="proj"></select>
   <select id="ver" title="版本"></select>
+  <button id="verCopyBtn" title="從目前這份鼓譜複製出新的編輯版本">複製版本</button>
+  <button id="verRenameBtn" title="幫編輯版本改名">改名</button>
+  <button id="verDelBtn" title="刪除編輯版本">刪除</button>
   <span id="roHint" class="ro"></span>
   <span class="grow"></span>
   <span id="saveState" class="saved">已儲存</span>
@@ -120,7 +123,7 @@ dialog .row { justify-content: flex-end; }
         <button id="copyBtn" title="Ctrl+C">複製</button>
         <button id="pasteBtn" title="Ctrl+V">貼上</button>
         <button id="clearBtn">清空</button>
-        <button id="revertBtn" title="回到 AI 自動扒譜的結果">還原為 AI 版本</button>
+        <button id="revertBtn" title="回到來源版本的內容（來源已刪除則回到 AI 譜）">還原成來源版本</button>
       </div>
     </section>
 
@@ -238,9 +241,8 @@ async function confirmLeave() {
 const esc = t => String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 async function refreshVersions(selectId) {
   versions = await api(`/api/versions?p=${encodeURIComponent(P)}`);
-  const byId = Object.fromEntries(versions.map(v => [v.id, v]));
   $("ver").innerHTML = versions.map(v => {
-    const gone = v.kind === "edited" && v.source && !byId[v.source];
+    const gone = v.source_deleted;
     return `<option value="${v.id}">${v.kind === "ai" ? "AI 譜（唯讀）" : esc(v.name)}${gone ? "（來源已刪除）" : ""}</option>`;
   }).join("");
   $("ver").value = selectId;
@@ -260,6 +262,7 @@ async function loadProject(name, vid = "ai", force = false) {
   await refreshVersions(vid);
   $("roHint").textContent = vid === "ai" ? "唯讀：點格子會先建立新版本" : "";
   $("saveBtn").disabled = vid === "ai";
+  $("verRenameBtn").disabled = $("verDelBtn").disabled = vid === "ai";
   act = d.act; undoStack = []; redoStack = []; setDirty(false);
   try { localStorage.setItem("dce.proj", name); } catch (e) {}
   $("vid").src = d.media.includes("video.mp4") ? `/media/${P}/video.mp4` : "";
@@ -301,6 +304,38 @@ async function ensureEditable() {
   toast(`已建立新版本「${name}」`);
   return true;
 }
+async function copyVersion() {
+  if (!(await confirmLeave())) return;
+  $("nameInp").value = "";
+  const r = await ask("nameDlg");
+  const name = $("nameInp").value.trim();
+  if (r !== "ok" || !name) return;
+  const v = await api(`/api/versions?p=${encodeURIComponent(P)}`, { name, source: V });
+  const cur0 = cur;
+  await loadProject(P, v.id, true);
+  cur = cur0; renderAll();
+  toast(`已複製成新版本「${name}」`);
+}
+async function renameVersion() {
+  const old = versions.find(v => v.id === V);
+  const name = (prompt("新的版本名稱", old ? old.name : "") || "").trim();
+  if (!name || name === old.name) return;
+  await api(`/api/version/rename?p=${encodeURIComponent(P)}&v=${V}`, { name });
+  await refreshVersions(V);
+  toast("已改名");
+}
+async function deleteVersion() {
+  const old = versions.find(v => v.id === V);
+  if (!confirm(`確定要刪除版本「${old.name}」嗎？此動作無法復原。`)) return;
+  await api(`/api/version/delete?p=${encodeURIComponent(P)}&v=${V}`, {});
+  dirty = false;
+  await loadProject(P, "ai", true);
+  toast("已刪除版本");
+}
+const safely = fn => () => fn().catch(e => toast("失敗：" + e.message));
+$("verCopyBtn").onclick = safely(copyVersion);
+$("verRenameBtn").onclick = safely(renameVersion);
+$("verDelBtn").onclick = safely(deleteVersion);
 function guarded(fn) {
   return (...a) => { ensureEditable().then(ok => ok && fn(...a)).catch(e => toast("無法修改：" + e.message)); };
 }
@@ -516,13 +551,13 @@ $("pasteBtn").onclick = guarded(() => {
 });
 $("clearBtn").onclick = guarded(() => { pushUndo(); bar().events = []; bar().triplets = []; changed(); });
 $("revertBtn").onclick = guarded(async () => {
-  const a = await api(`/api/auto_bar?p=${P}&i=${cur}`);
+  const a = await api(`/api/restore_bar?p=${encodeURIComponent(P)}&v=${V}&i=${cur}`);
   pushUndo();
   bar().events = a.events.map(e => ({ tick: e.tick ?? e.slot * 3, notes: e.notes }));
   bar().triplets = [];
   delete bar().edited;
   setDirty(true); renderAll();
-  toast("已還原為 AI 版本");
+  toast("已還原成來源版本");
 });
 function undo() {
   const u = undoStack.pop(); if (!u) return;
