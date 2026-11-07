@@ -1,3 +1,4 @@
 [submodule "third_party/ADTOF-pytorch"]
 	path = third_party/ADTOF-pytorch
 	url = https://github.com/xavriley/ADTOF-pytorch.git
+	ignore = dirty
