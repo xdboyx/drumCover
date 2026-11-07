@@ -42,6 +42,7 @@ main { padding: 14px 16px 40px; display: grid; gap: 14px; max-width: 1500px; mar
 .legend .l-u1::before { background: var(--warn-soft); } .legend .l-u2::before { background: #f9c98a; }
 .legend .l-ed::before { border: 2px solid var(--ok); } .legend .l-rest::before { background: #eeebe6; }
 #lineWrap { position: relative; }
+#lineCursor { position: absolute; background: rgb(110,185,255); mix-blend-mode: multiply; pointer-events: none; display: none; }
 #lineImg { width: 100%; display: block; border-radius: 6px; cursor: pointer; background: #fff; min-height: 60px; }
 .top { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 14px; align-items: start; }
 @media (max-width: 1100px) { .top { grid-template-columns: 1fr; } }
@@ -114,7 +115,7 @@ dialog .row { justify-content: flex-end; }
         <span class="grow"></span>
         <span class="hint" id="barTime"></span>
       </div>
-      <div id="lineWrap" style="margin-top:10px"><img id="lineImg" alt="譜面預覽" title="點譜面上的小節可直接跳過去"></div>
+      <div id="lineWrap" style="margin-top:10px"><img id="lineImg" alt="譜面預覽" title="點譜面上的小節可直接跳過去"><div id="lineCursor"></div></div>
 
       <div id="gridWrap" style="margin-top:6px"><div id="grid"></div></div>
 
@@ -129,7 +130,7 @@ dialog .row { justify-content: flex-end; }
 
     <section class="card">
       <h2>試聽與比對</h2>
-      <video id="vid" playsinline preload="auto"></video>
+      <video id="vid" playsinline preload="auto" controls></video>
       <audio id="aud" preload="auto"></audio>
       <div class="row" style="margin-top:10px">
         <button id="playBtn" class="primary" title="空白鍵">▶ 播放這一小節</button>
@@ -420,7 +421,7 @@ function barUnsure(i) {
 }
 
 // ---------------------------------------------------------------- 畫面
-function renderAll() { renderOverview(); renderBar(); scheduleLine(); }
+function renderAll() { renderOverview(); renderBar(); previewDirty(); }
 
 function renderOverview() {
   const ov = $("overview");
@@ -509,31 +510,65 @@ function renderBar() {
   g.appendChild(ph);
 }
 
-function scheduleLine() { clearTimeout(lineTimer); lineTimer = setTimeout(renderLine, 120); }
-async function renderLine() {
-  const start = Math.floor(cur / 4) * 4;
-  const bars = score.bars.slice(start, start + 4);
-  try {
-    const d = await api("/api/line", { bars, first_no: start + 1, highlight: cur - start });
-    $("lineImg").src = "data:image/png;base64," + d.png;
-    $("lineImg").dataset.start = start;
-  } catch (e) { toast("譜面預覽失敗：" + e.message); }
+// ---- 即時預覽：譜面（與練習影片同一套排版）+ 游標，依影片時間顯示。內容以目前記憶體中的鼓譜為準（含未存檔修改）
+const pv = { rev: 0, cache: new Map(), lines: null, shown: null, loading: false, prefetch: false };
+function previewDirty() { pv.rev++; pv.cache.clear(); pv.lines = null; }
+async function fetchLine(li) {
+  const rev = pv.rev;
+  const d = await api("/api/preview_line", { score, line: li, simile: $("simileChk").checked });
+  if (rev === pv.rev) { pv.cache.set(li, d); pv.lines = d.lines; }
+}
+function previewTime() {
+  const v = $("vid");
+  return v.getAttribute("src") && v.readyState > 0 ? v.currentTime : bar().t0;
+}
+function previewFrame() {
+  if (!score) return;
+  const t = previewTime();
+  let li = 0;
+  if (pv.lines) for (let i = 0; i < pv.lines.length; i++) if (t >= pv.lines[i][0]) li = i;
+  const d = pv.cache.get(li);
+  if (!d) {
+    if (!pv.loading) { pv.loading = true; fetchLine(li).catch(e => toast("譜面預覽失敗：" + e.message)).finally(() => { pv.loading = false; }); }
+    return;
+  }
+  if (pv.shown !== d) { $("lineImg").src = "data:image/png;base64," + d.png; pv.shown = d; }
+  const c = $("lineCursor");
+  let x = null;
+  if (t >= d.t0 - 0.01) for (const [et, ex] of d.evs) { if (et <= t) x = ex; else break; }
+  if (x === null) { c.style.display = "none"; }
+  else {
+    const k = d.cursor;
+    c.style.display = "block";
+    c.style.left = ((x - k.dx) / d.width * 100) + "%";
+    c.style.width = (k.w / d.width * 100) + "%";
+    c.style.top = (k.y0 / d.height * 100) + "%";
+    c.style.height = ((k.y1 - k.y0) / d.height * 100) + "%";
+  }
+  if (!pv.loading && !pv.prefetch && pv.lines && li + 1 < pv.lines.length && !pv.cache.has(li + 1)) {   // 預先排好下一行
+    pv.prefetch = true;
+    fetchLine(li + 1).catch(() => {}).finally(() => { pv.prefetch = false; });
+  }
 }
 $("lineImg").onclick = ev => {
+  const d = pv.shown;
+  if (!d) return;
   const r = ev.target.getBoundingClientRect();
-  const x = (ev.clientX - r.left) / r.width * 1920;
-  const x0 = 40 + 8 + 60, bw = (1920 - 40 - x0) / 4;
-  const k = Math.floor((x - x0) / bw);
-  const i = +ev.target.dataset.start + k;
-  if (k >= 0 && k < 4 && i < score.bars.length) go(i);
+  const x = (ev.clientX - r.left) / r.width * d.width;
+  const m = d.measures.find(m => x >= m.x0 && x < m.x1);
+  if (m) go(m.bar);
 };
+$("simileChk").addEventListener("change", previewDirty);
+setInterval(previewFrame, 30);   // 不用 rAF：分頁在背景或被遮住時 rAF 會停
 
 function go(i) {
   if (i < 0 || i >= score.bars.length) return;
   const wasPlaying = playing;
   stop();
   cur = i;
-  renderAll();
+  renderOverview(); renderBar();
+  const v = $("vid");
+  if (v.getAttribute("src") && v.readyState > 0) v.currentTime = bar().t0;   // 預覽跟著影片時間，所以跳小節就是把影片跳過去
   if (wasPlaying && $("loopBtn").classList.contains("on")) play();
 }
 const fmt = t => `${Math.floor(t / 60)}:${(t % 60).toFixed(2).padStart(5, "0")}`;

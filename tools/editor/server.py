@@ -200,6 +200,34 @@ def render_line_png(bars, first_no, highlight):
     return buf.getvalue()
 
 
+def preview_line(body):
+    """即時預覽：依傳入（可含未存檔修改）的鼓譜，回傳第 line 行的譜面圖、游標位置 [t, x]，
+    以及每一行的時間範圍（前端據此由影片時間找出該顯示哪一行）。與練習影片用同一套排版。"""
+    score = normalize(body["score"])
+    simile = body.get("simile", True)
+    lines = dc.lines_of(score, simile=simile)
+    li = int(body.get("line", 0))
+    if not 0 <= li < len(lines):
+        raise FileNotFoundError(f"第 {li} 行")
+    ms = lines[li]
+    img, xs = renderer.render_line(ms, show_header=li == 0, is_last_line=li == len(lines) - 1,
+                                   tempo=int(round(score["bpm"])))
+    t0, t1 = ms[0]["t0"], ms[-1]["t1"]
+    evs = sorted((e["t"], xs[e["idx"]]) for m in ms for e in m["events"] if e["idx"] in xs)
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    L = renderer.L
+    bx = L.margin_l + 8 + L.clef_w + (L.header_w if li == 0 else 0)
+    bar_w = (L.width - L.margin_r - bx) / L.bars_per_line
+    cw = int(L.sp * 1.6)   # 與 notation.render_cursor 的游標範圍一致
+    return {"png": base64.b64encode(buf.getvalue()).decode(), "t0": t0, "t1": t1,
+            "evs": [[t, x] for t, x in evs], "width": L.width, "height": L.height,
+            "cursor": {"dx": cw / 2 - L.sp * 0.15, "w": cw, "y0": int(L.y(-7.5)), "y1": int(L.y(13))},
+            "measures": [{"x0": bx + k * bar_w, "x1": bx + (k + 1) * bar_w, "bar": m["no"] - 1, "t0": m["t0"]}
+                         for k, m in enumerate(ms)],
+            "lines": [[ms[0]["t0"], ms[-1]["t1"]] for ms in lines]}
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
@@ -327,6 +355,8 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/api/version/delete":
                 delete_version(project(q["p"]), q["v"])
                 return self._send(200, {"ok": True})
+            if u.path == "/api/preview_line":
+                return self._send(200, preview_line(self._body()))
             if u.path == "/api/line":
                 body = self._body()
                 png = render_line_png(body["bars"], body["first_no"], body.get("highlight"))

@@ -91,6 +91,7 @@ AI 自動扒譜在 KICK BACK 驗證的準確度約 95.6%（完全正確的小節
 | POST | `/api/score?p=` | 存檔：重算每個事件的 `t`、`idx`；**第一次存檔前把原檔備份成 `score.auto.json`** |
 | GET | `/api/auto_bar?p=&i=` | 取 AI 原始版本的某一小節（「還原為 AI 版本」用） |
 | POST | `/api/line` | 傳入 4 個小節 → 回傳排版好的譜面 PNG（base64），目前小節用淡黃色標示 |
+| POST | `/api/preview_line` | 傳入（可含未存檔修改的）整份鼓譜與行號 → 回傳該行譜面 PNG、游標位置 `[t, x]`、小節 x 範圍、每行時間範圍；前端依影片時間畫游標（即時預覽） |
 | GET | `/media/<p>/<file>` | video.mp4 / mix.wav / drums.wav，**要支援 HTTP Range**（影片拖曳、跳播需要） |
 | POST | `/api/render?p=` | 背景執行 `drumcover.py render`（參數：crop_y、simile） |
 | GET | `/api/render_status?p=` | 輸出進度（解析 ffmpeg 的 `time=`） |
