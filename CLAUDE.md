@@ -22,3 +22,17 @@
 擱置中或還沒做的想法，以及已經規劃好的做法，都記在 **[docs/future-ideas.md](docs/future-ideas.md)**。
 - 開始新功能前先看這份文件，可能已經有規劃
 - 使用者說「先擱置」「之後再做」的想法，要把想法和已規劃的做法寫進這份文件，之後不用重新想
+
+## Agent skills
+
+### Issue tracker
+
+Issues 放在 GitHub Issues（`xdboyx/drumCover`，用 `gh` CLI）。See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+使用預設五個標籤（`needs-triage`、`needs-info`、`ready-for-agent`、`ready-for-human`、`wontfix`）。See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+single-context（根目錄 `GLOSSARY.md` + `docs/adr/`）。See `docs/agents/domain.md`.
