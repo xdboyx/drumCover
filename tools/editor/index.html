@@ -156,6 +156,14 @@ dialog .row { justify-content: flex-end; }
         <span class="hint" id="renderState"></span>
       </div>
       <div id="renderLog"></div>
+
+      <h2 style="margin-top:16px">輸出鼓譜圖檔</h2>
+      <div class="row">
+        <button id="sheetPdfBtn">輸出 PDF</button>
+        <button id="sheetPngBtn">輸出 PNG</button>
+        <button id="openExportsBtn">開啟輸出資料夾</button>
+        <span class="hint" id="sheetState">依目前選的版本、上方 % 記號選項輸出（A4 直式）</span>
+      </div>
     </section>
   </div>
 
@@ -684,6 +692,19 @@ $("renderBtn").onclick = async () => {
     pollRender();
   } catch (e) { toast("無法輸出：" + e.message); }
 };
+// ---------------------------------------------------------------- 輸出鼓譜圖檔
+async function exportSheet(format) {
+  try {
+    if (dirty && V !== "ai") await save();
+    $("sheetState").textContent = "輸出中…";
+    const r = await api(`/api/export_sheet?p=${encodeURIComponent(P)}`, { version: V, format, simile: $("simileChk").checked });
+    $("sheetState").textContent = `完成：exports/${r.files[0]}${r.files.length > 1 ? ` 等 ${r.files.length} 張` : ""}（共 ${r.pages} 頁）`;
+  } catch (e) { $("sheetState").textContent = ""; toast("無法輸出：" + e.message); }
+}
+$("sheetPdfBtn").onclick = () => exportSheet("pdf");
+$("sheetPngBtn").onclick = () => exportSheet("png");
+$("openExportsBtn").onclick = () => api(`/api/open_exports?p=${encodeURIComponent(P)}`, {}).catch(e => toast("無法開啟：" + e.message));
+
 async function pollRender() {
   const s = await api(`/api/render_status?p=${P}`);
   const m = [...s.log.matchAll(/time=(\d+):(\d+):([\d.]+)/g)].pop();

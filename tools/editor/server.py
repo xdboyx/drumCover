@@ -28,6 +28,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 import drumcover as dc                      # noqa: E402
 from notation import LineRenderer, Layout   # noqa: E402
+import sheet_export                          # noqa: E402
 
 # 編輯器的樂器列 -> ADTOF 類別（用來顯示模型信心）
 ACT_CLASS = {"CR": "CY", "RD": "CY", "HH": "HH", "HO": "HH", "SD": "SD", "XS": "SD",
@@ -268,6 +269,21 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/api/versions":
                 body = self._body()
                 return self._send(200, create_version(project(q["p"]), body.get("name"), body.get("source", AI)))
+            if u.path == "/api/export_sheet":
+                P = project(q["p"])
+                body = self._body()
+                if body.get("format") not in ("pdf", "png"):
+                    raise HttpError(400, "format 必須是 pdf 或 png")
+                vid = body.get("version", AI)
+                score = read_version(P, vid)
+                name = "AI 譜" if vid == AI else score.get("meta", {}).get("name", vid)
+                return self._send(200, sheet_export.export_sheet(
+                    P, score, dc.display_measures, name, body["format"], body.get("simile", True)))
+            if u.path == "/api/open_exports":
+                P = project(q["p"])
+                (P / "exports").mkdir(exist_ok=True)
+                sheet_export.open_folder(str(P / "exports"))
+                return self._send(200, {"ok": True})
             if u.path == "/api/line":
                 body = self._body()
                 png = render_line_png(body["bars"], body["first_no"], body.get("highlight"))
