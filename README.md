@@ -118,3 +118,10 @@ python -m venv .venv
 
 - 下載的影片多半有版權，產出的練習影片僅供個人練習，請勿公開散布。
 - 自動扒譜不是 100% 準確，輸出前建議先看 `score_preview.png`。
+
+## 授權與致謝
+
+- 扒鼓模型使用 [ADTOF](https://github.com/MZehren/ADTOF)（Zehren、Alunno、Bientinesi 等人），其內容採用 [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/)（需署名、**禁止商業使用**、衍生作品須以相同方式授權）。
+- PyTorch 移植版為 [xavriley/ADTOF-pytorch](https://github.com/xavriley/ADTOF-pytorch)，以 git submodule 引入，本 repo 不包含它的程式碼與權重。該 repo 目前沒有明確的 LICENSE，其模型權重轉換自上述 ADTOF，請比照 ADTOF 的授權條件使用。
+- 因此，**本工具僅限個人學習、練習等非商業用途**。若要商業使用，請先向原作者確認授權。
+- 另外使用 [Demucs](https://github.com/facebookresearch/demucs)、[beat_this](https://github.com/CPJKU/beat_this)、[yt-dlp](https://github.com/yt-dlp/yt-dlp) 等開源套件，各自依其授權。
