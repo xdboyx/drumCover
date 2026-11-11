@@ -23,7 +23,8 @@ review 時對照；只收需要判斷的規則。固定格式的問題交給檢�
 ## 本機限制
 
 - 伺服器只綁 `127.0.0.1`，並檢查 Host／Origin（見 `docs/adr/0001-本機網頁應用程式.md`）。
-- 執行期不新增套件，前端維持原生 JS、單一檔案一頁。
+- Python 執行期不新增套件（只用標準庫與既有的 numpy／PIL）。
+- 前端是 `tools/editor/web/`：React + TypeScript + Tailwind + shadcn/ui，結構參考 shadcn-admin（`features`／`components`／`routes`／`stores`／`lib`）。純邏輯放 `features/*/lib`，用 vitest 測。
 
 ## 用語
 

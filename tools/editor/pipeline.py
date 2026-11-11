@@ -9,6 +9,7 @@
 P 是專案資料夾；report(0~1) 回報目前步驟進度；失敗就丟例外。
 這裡的正式實作都是呼叫 drumcover.py 的子行程，已存在的中間檔該步會自己跳過。
 """
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -27,7 +28,8 @@ def title(source):
     if Path(source).is_file():
         return Path(source).stem
     r = subprocess.run([sys.executable, "-m", "yt_dlp", "--no-playlist", "--skip-download", "--print", "title",
-                        source], capture_output=True, cwd=str(ROOT))
+                        source], capture_output=True, cwd=str(ROOT),
+                       env={**os.environ, "PYTHONIOENCODING": "utf-8"})  # Windows 預設 cp950，標題會變亂碼
     if r.returncode != 0:
         raise RuntimeError("取得影片標題失敗：" + r.stderr.decode("utf-8", "replace").strip()[-300:])
     return r.stdout.decode("utf-8", "replace").strip().splitlines()[0]

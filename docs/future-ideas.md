@@ -70,15 +70,16 @@ AI 自動扒譜在 KICK BACK 驗證的準確度約 95.6%（完全正確的小節
 
 ### 草稿既有設計（沿用，要配合上面的版本機制調整）
 
-草稿已發展成正式實作（以下檔案現在都有測試，並接上扒譜／輸出流程；另有 `jobs.py`、`pipeline.py`、`render_job.py`、`sheet_export.py`、`home.html`）：
+草稿已發展成正式實作（以下檔案現在都有測試，並接上扒譜／輸出流程；另有 `jobs.py`、`pipeline.py`、`render_job.py`、`sheet_export.py`）：
 
-- `tools/editor/server.py`：本機伺服器（Python 標準庫 `ThreadingHTTPServer`，不需要新套件）
-- `tools/editor/index.html`：單一檔案前端（原生 JS + CSS）
+- `tools/editor/server.py`：本機伺服器進入點、HTTP 與路由（Python 標準庫 `ThreadingHTTPServer`，不需要新套件）；
+  領域邏輯分在 `projects.py`、`versions.py`、`preview.py`、`common.py`
+- `tools/editor/web/`：React + TypeScript + Tailwind + shadcn/ui 前端，build 產物 `web/dist/` 由 `server.py` 提供
 
 ### 架構
 
 ```
-瀏覽器 (index.html)  ⇄  server.py (127.0.0.1:8765)  ⇄  projects/<name>/score.json
+瀏覽器 (React SPA)   ⇄  server.py (127.0.0.1:8765)  ⇄  projects/<name>/score.json
                                     └─ 呼叫 drumcover.py / notation.py（跟成品影片同一套排版器）
 ```
 
@@ -107,7 +108,7 @@ AI 信心的算法：用 `drumcover.load_activations(P, "hybrid")`，先套用 `
 在每個 16 分格取 ±1/8 拍視窗內的最大機率，三連音格取 ±1/6 拍。
 編輯器的樂器列對到 ADTOF 類別：CR/RD→CY、HH/HO→HH、SD/XS→SD、TH/TM/TF→TM、BD→BD、HF→無。
 
-### 前端功能（index.html）
+### 前端功能（`tools/editor/web/`）
 
 - **小節總覽**：所有小節排成小方塊，每 4 個一組（一行）。顏色：AI 有點不確定（淺橘）、很不確定（深橘，≥3 處）、
   整小節休止（灰）、已修改（綠框）、目前小節（藍框）。點一下就跳過去。
@@ -146,7 +147,7 @@ AI 信心的算法：用 `drumcover.load_activations(P, "hybrid")`，先套用 `
    （取代原本「`drumcover.py score` 把 `edited` 小節搬到新結果」的規劃）
 5. 編輯畫面上方的即時鼓譜游標預覽
 6. `drumCover.bat`、`.claude/launch.json`，實際啟動測試（Browser pane）：載入、編輯、存檔、預覽、播放同步、合成鼓聲、兩種輸出
-7. 清理 `server.py` 的 `bar_activations()`（16 分格那段 list comprehension 寫得很繞）
+7. ~~清理 `bar_activations()`~~（已完成，改成 `preview.py` 的 `slot_levels()`）
 8. 把用法寫進 `drum-score-video` skill
 
 ### 可以再加的
@@ -317,9 +318,3 @@ day6-happy 從頭重跑 `analyze` 後，126 小節中有 13 小節不同（每�
 
 `"ai"` 同時是版本 id 也是種類，`vid == AI`、`meta.kind` 的判斷散在 `list_versions`、`require_editable`、`derived_old_ai`、`restore_bar`。
 規劃的做法：版本資料用一個小型別（id、種類、是否唯讀）包起來，各處問它而不是比字串。
-
-### `server.py` 太長
-
-約 670 行，同時含路由、專案命名驗證、版本管理、預覽繪圖、重新扒譜邏輯；多張票並行時 `server.py` 和 `index.html` 合併衝突最多。
-規劃的做法：依責任拆成路由、版本、專案、預覽四個模組；測試只走 HTTP，拆檔時不用改。`index.html` 維持單一檔案。
-

@@ -7,9 +7,11 @@
 - `tools/drumcover.py`：主流程 CLI（`download / analyze / score / render / all`）
 - `tools/notation.py`：鼓譜排版器（PIL 手繪，雙聲部日系鼓譜慣例）
 - `tools/evaluate.py`、`tools/gt_tools.py`：拿附有鼓譜的影片驗證扒譜準確度
-- `tools/editor/`：本機網頁操作介面（扒譜、預覽、編輯版本、輸出）。規劃脈絡見 `docs/future-ideas.md` 第 1 節
+- `tools/editor/`：本機網頁操作介面後端（扒譜、預覽、編輯版本、輸出）。規劃脈絡見 `docs/future-ideas.md` 第 1 節
+  - 模組分工：`server.py` 進入點／HTTP／路由／靜態檔；`projects.py` 專案與扒譜工作；`versions.py` 版本與唯讀規則；`preview.py` 即時預覽；`common.py` 共用設定
+- `tools/editor/web/`：React + TypeScript 前端。開發：`npm run dev`（Vite，proxy 到 8765 的後端）；`npm run build` 產生 `dist/`，由 `server.py` 提供（`--web-dist` 可換位置）
 - `tests/`：編輯器的 HTTP 測試，寫法見 [CODING_STANDARDS.md](CODING_STANDARDS.md)；CI 在 `.github/workflows/test.yml`
-- `啟動操作介面.bat`：雙擊啟動編輯器伺服器並開瀏覽器
+- `啟動操作介面.bat`：雙擊啟動編輯器伺服器並開瀏覽器（沒有 `dist/` 時會先 build，需要 Node.js）
 - `projects/<name>/`：每首歌的中間檔與成品（video.mp4、score.json、out.mp4…）
 - `third_party/ADTOF-pytorch/`：扒鼓模型
 - 一律使用專案 venv：`.venv/Scripts/python.exe`。`.venv/` 不進版控，git worktree 裡沒有；在 worktree 裡改用主目錄的：`$(git worktree list --porcelain | head -1 | cut -d' ' -f2)/.venv/Scripts/python.exe`
