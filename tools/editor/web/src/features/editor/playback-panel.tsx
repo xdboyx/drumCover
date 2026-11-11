@@ -44,6 +44,8 @@ export function PlaybackPanel() {
         preload="auto"
         controls
         onLoadedMetadata={playback.onVideoLoaded}
+        onTimeUpdate={playback.onVideoTime}
+        onSeeked={playback.onVideoTime}
         className="bg-black aspect-video w-full rounded-lg"
       />
       <audio ref={refs.audio} src={hasDrums ? mediaUrl(project, 'drums.wav') : undefined} preload="auto" />

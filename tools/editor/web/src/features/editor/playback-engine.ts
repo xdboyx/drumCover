@@ -32,6 +32,8 @@ export interface EngineDeps {
  */
 export class PlaybackEngine {
   playing = false
+  /** 最近一次停止的時間（performance.now），停止後的 seeked／timeupdate 事件不要當成使用者操作 */
+  stoppedAt = -Infinity
   private sync: { ctx: number; media: number } | null = null
   private raf = 0
   private lastBeat = -1
@@ -157,6 +159,7 @@ export class PlaybackEngine {
   /** 停止播放、停掉合成鼓聲、藏起播放頭。 */
   stop(): void {
     this.playing = false
+    this.stoppedAt = performance.now()
     cancelAnimationFrame(this.raf)
     this.synth.stopAll()
     this.deps.video()?.pause()

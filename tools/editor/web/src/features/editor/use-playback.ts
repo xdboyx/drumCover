@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { toast } from 'sonner'
 import { useEditorPrefs } from '@/stores/editor-prefs-store'
+import { barIndexAt } from './lib/bar'
 import { PlaybackEngine } from './playback-engine'
 import { useEditorStore } from './store'
 
@@ -19,6 +20,8 @@ export interface Playback {
   go: (i: number) => void
   /** 影片 metadata 載入完成：把影片時間設到目前小節（播放中不動） */
   onVideoLoaded: () => void
+  /** 使用者直接用影片控制列播放或拖曳時，讓「目前小節」跟著影片時間走 */
+  onVideoTime: () => void
 }
 
 /** 試聽：把 PlaybackEngine 接到 React（元件卸載時停止、播放中改音源/速度/模式時重新開始）。 */
@@ -74,5 +77,14 @@ export function usePlayback(refs: PlaybackRefs): Playback {
     if (!engine.playing) engine.seekToBar()
   }, [engine])
 
-  return { play, stop, toggle, go, onVideoLoaded }
+  const onVideoTime = useCallback(() => {
+    if (engine.playing || performance.now() - engine.stoppedAt < 500) return // 「播放這一小節」自己管小節
+    const video = refsRef.current.video.current
+    const s = useEditorStore.getState()
+    if (!video || !s.score) return
+    const i = barIndexAt(s.score.bars, video.currentTime)
+    if (i !== s.cur) s.setCur(i)
+  }, [engine])
+
+  return { play, stop, toggle, go, onVideoLoaded, onVideoTime }
 }
