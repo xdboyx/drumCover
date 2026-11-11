@@ -5,6 +5,9 @@ __pycache__/
 .claude/settings.local.json
 .archify/
 
+node_modules/
+tools/editor/web/dist/
+
 # 各歌曲的專案資料（影片、音訊、譜、中間檔）全部不進版控
-projects/
+/projects/
 desktop.ini

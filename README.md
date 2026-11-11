@@ -11,7 +11,7 @@
 
 ## 安裝
 
-需要 Python 3.10 以上。建議有 NVIDIA 顯卡（分離與輸出影片都會快很多）。
+需要 Python 3.10 以上；使用網頁操作介面另需 Node.js（第一次啟動會自動建置前端）。建議有 NVIDIA 顯卡（分離與輸出影片都會快很多）。
 
 ```bash
 git clone --recurse-submodules https://github.com/xdboyx/drumCover.git
@@ -109,7 +109,7 @@ python -m venv .venv
 - `tools/drumcover.py`：主流程 CLI
 - `tools/notation.py`：鼓譜排版器
 - `tools/evaluate.py`、`tools/gt_tools.py`：拿附有鼓譜的影片驗證準確度
-- `tools/editor/`：逐小節編輯器（草稿，未測試）
+- `tools/editor/`：本機網頁操作介面（後端 Python，前端 `web/` 為 React；雙擊 `啟動操作介面.bat` 啟動）
 - `projects/`：每首歌的中間檔與成品（影片、音訊、`score.json` 等，執行時自動建立，不納入版控）
 - `third_party/ADTOF-pytorch`：扒鼓模型（git submodule）
 - `.claude/skills/`：給 Claude Code 用的流程說明

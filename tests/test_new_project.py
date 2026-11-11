@@ -193,10 +193,3 @@ def test_失敗的專案名稱不能被重複使用(srv, fake):
 
 def test_不是新增專案失敗的專案不能重試(srv):
     assert call("POST", f"{srv}/api/projects/retry?p={urllib.parse.quote('假歌')}")[0] == 400
-
-
-def test_首頁是專案清單_編輯畫面在editor(srv):
-    home = urllib.request.urlopen(srv + "/").read().decode("utf-8")
-    editor = urllib.request.urlopen(srv + "/editor").read().decode("utf-8")
-    assert "project_list" in home and "project_list" not in editor
-    assert 'id="overview"' in editor

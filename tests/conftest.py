@@ -36,10 +36,10 @@ def projects_root(tmp_path):
 
 
 @contextmanager
-def launch_server(projects_root, env=None):
+def launch_server(projects_root, env=None, args=()):
     port = free_port()
     proc = subprocess.Popen(
-        [sys.executable, str(SERVER), "--port", str(port), "--projects-root", str(projects_root)],
+        [sys.executable, str(SERVER), "--port", str(port), "--projects-root", str(projects_root), *args],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env={**os.environ, **(env or {})})
     base = f"http://127.0.0.1:{port}"
     try:
