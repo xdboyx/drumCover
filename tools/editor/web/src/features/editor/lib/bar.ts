@@ -115,3 +115,10 @@ export function tickTime(b: Bar, tick: number): number {
   const bt = b.beats
   return bt[j] + ((bt[j + 1] - bt[j]) * (tick % TICKS)) / TICKS
 }
+
+/** 影片時間 t 落在第幾小節（最後一個起點 ≤ t 的小節；容許 Chrome 把 currentTime 截斷的誤差） */
+export function barIndexAt(bars: Bar[], t: number, eps = 0.005): number {
+  let idx = 0
+  for (let i = 0; i < bars.length; i++) if (bars[i].t0 <= t + eps) idx = i
+  return idx
+}

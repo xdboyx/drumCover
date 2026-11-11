@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Bar } from '@/lib/types'
 import {
   applyBarContent,
+  barIndexAt,
   barContent,
   clearBar,
   hasNote,
@@ -178,5 +179,17 @@ describe('tickTime', () => {
     expect(tickTime(b, 12)).toBeCloseTo(10.5)
     expect(tickTime(b, 12 + 6)).toBeCloseTo(10.875)
     expect(tickTime(b, 36)).toBeCloseTo(11.5)
+  })
+})
+
+describe('barIndexAt', () => {
+  const bars = [{ t0: 1.5 }, { t0: 3 }, { t0: 4.5 }] as never[]
+  it('回傳最後一個起點 ≤ t 的小節', () => {
+    expect(barIndexAt(bars, 0)).toBe(0)
+    expect(barIndexAt(bars, 3.2)).toBe(1)
+    expect(barIndexAt(bars, 99)).toBe(2)
+  })
+  it('容許 currentTime 被截斷的誤差', () => {
+    expect(barIndexAt(bars, 2.999999)).toBe(1)
   })
 })
