@@ -148,7 +148,7 @@ GET_ROUTES = {
 
 POST_ROUTES = {
     "/api/projects/new": lambda h, q: new_project(h.body()),
-    "/api/projects/reimport": lambda h, q: reimport_project(q.get("p")),
+    "/api/projects/reimport": lambda h, q: reimport_project(q.get("p"), h.body()),
     "/api/projects/retry": lambda h, q: retry_project(q.get("p")),
     "/api/score": post_score,
     "/api/versions": post_version_create,

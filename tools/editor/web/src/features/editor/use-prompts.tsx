@@ -9,6 +9,10 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { SCORE_MODE_HINT, SCORE_MODE_OPTIONS } from '@/lib/score-mode'
+import type { ScoreMode } from '@/lib/types'
 
 export interface NameOptions {
   title: string
@@ -30,14 +34,59 @@ export type LeaveChoice = 'save' | 'discard' | 'cancel'
 type Pending =
   | { kind: 'name'; opts: NameOptions; resolve: (v: string | null) => void }
   | { kind: 'confirm'; opts: ConfirmOptions; resolve: (v: boolean) => void }
+  | { kind: 'reimport'; initial: ScoreMode; resolve: (v: ScoreMode | null) => void }
   | { kind: 'leave'; resolve: (v: LeaveChoice) => void }
 
 export interface Prompts {
   /** 跳出命名對話框；取消回傳 null，否則回傳去掉前後空白的名稱 */
   askName: (opts: NameOptions) => Promise<string | null>
   askConfirm: (opts: ConfirmOptions) => Promise<boolean>
+  /** 重新扒譜：選扒譜模式（預設帶入 initial）；取消回傳 null */
+  askReimport: (initial: ScoreMode) => Promise<ScoreMode | null>
   /** 有未存修改時問：存檔後切換／放棄修改／取消 */
   askLeave: () => Promise<LeaveChoice>
+}
+
+function ReimportForm({
+  initial,
+  onDone,
+}: {
+  initial: ScoreMode
+  onDone: (mode: ScoreMode | null) => void
+}) {
+  const [mode, setMode] = useState<ScoreMode>(initial)
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle>重新扒譜？</DialogTitle>
+        <DialogDescription>
+          重新扒譜會把目前的 AI 譜保存成唯讀的舊 AI 譜，你的編輯版本不會改變。
+        </DialogDescription>
+      </DialogHeader>
+      <div className="grid gap-1.5">
+        <Label htmlFor="reimport-mode">扒譜模式</Label>
+        <Select value={mode} onValueChange={(v) => setMode(v as ScoreMode)}>
+          <SelectTrigger id="reimport-mode" className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {SCORE_MODE_OPTIONS.map((o) => (
+              <SelectItem key={o.value} value={o.value}>
+                {o.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-muted-foreground text-xs">{SCORE_MODE_HINT}</p>
+      </div>
+      <DialogFooter>
+        <Button variant="outline" onClick={() => onDone(null)}>
+          取消
+        </Button>
+        <Button onClick={() => onDone(mode)}>開始重新扒譜</Button>
+      </DialogFooter>
+    </>
+  )
 }
 
 function NameForm({
@@ -119,6 +168,11 @@ export function usePrompts(): { prompts: Prompts; element: ReactNode } {
     (opts: ConfirmOptions) => open<boolean>((resolve) => ({ kind: 'confirm', opts, resolve })),
     [open]
   )
+  const askReimport = useCallback(
+    (initial: ScoreMode) =>
+      open<ScoreMode | null>((resolve) => ({ kind: 'reimport', initial, resolve })),
+    [open]
+  )
   const askLeave = useCallback(
     () => open<LeaveChoice>((resolve) => ({ kind: 'leave', resolve })),
     [open]
@@ -167,6 +221,17 @@ export function usePrompts(): { prompts: Prompts; element: ReactNode } {
       </Dialog>
 
       <Dialog
+        open={pending?.kind === 'reimport'}
+        onOpenChange={(o) => !o && pending?.kind === 'reimport' && pending.resolve(null)}
+      >
+        <DialogContent showCloseButton={false}>
+          {pending?.kind === 'reimport' && (
+            <ReimportForm initial={pending.initial} onDone={(m) => pending.resolve(m)} />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
         open={pending?.kind === 'leave'}
         onOpenChange={(o) => !o && pending?.kind === 'leave' && pending.resolve('cancel')}
       >
@@ -193,5 +258,5 @@ export function usePrompts(): { prompts: Prompts; element: ReactNode } {
     </>
   )
 
-  return { prompts: { askName, askConfirm, askLeave }, element }
+  return { prompts: { askName, askConfirm, askReimport, askLeave }, element }
 }

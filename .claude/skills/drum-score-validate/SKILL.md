@@ -39,6 +39,15 @@ description: 用「本身附有鼓譜的打鼓影片」驗證並改進自動扒�
 ```
 差異符號：`+3e` 多抓、`-2&` 漏抓。
 
+其他用法：
+```
+.venv/Scripts/python.exe tools/evaluate.py <name> --ref projects/<name>/versions/<id>.json   # 拿編輯版本當標準答案（小節數對不上會警告）
+.venv/Scripts/python.exe tools/evaluate.py <name> --mode enhanced    # 不讀 score.json，用分析檔在記憶體內以該模式扒譜後評分，不覆寫檔案
+.venv/Scripts/python.exe tools/evaluate.py --all                     # 所有有標準答案的專案，basic／enhanced 對照表，並列出 enhanced 退步的歌
+```
+- 扒譜有兩種模式：`drumcover.py score <name> --mode basic|enhanced`（預設 basic）。新的演算法修正只加在 enhanced（`enhanced_steps`），basic 不動；`tests/test_score_mode.py` 用 golden 鎖住 basic。
+- 改完 enhanced 先跑 `--all`，有任何一首退步就先找原因，不要直接採用。
+
 ## 4. 找原因的套路（依過去經驗由大到小）
 
 1. **整段錯位/節奏全亂** → 拍點：檢查 `beats.json` 拍距是否在某段變 2 倍或一半（`repair_beats`）。

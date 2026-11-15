@@ -453,7 +453,7 @@ def split_toms(onsets, P):
 
 def cmd_score(a):
     P = proj(a.name)
-    score = build_score(P, source=a.source)
+    score = build_score(P, source=a.source, mode=a.mode)
     (P / "score.json").write_text(json.dumps(score, ensure_ascii=False, indent=1))
     n_ev = sum(len(b["events"]) for b in score["bars"])
     print(f"BPM≈{score['bpm']}  meter={score['meter']}  bars={len(score['bars'])}  events={n_ev}  "
@@ -461,7 +461,21 @@ def cmd_score(a):
     preview(P, score)
 
 
-def build_score(P, source="hybrid", thresholds=None):
+SCORE_MODES = ("basic", "enhanced")
+
+
+def enhanced_steps(P, onsets, bars, th):
+    """加強扒譜專用的修正步驟，依序套用在 (onsets, bars)。基本扒譜不會呼叫這裡。
+    每個步驟簽名 step(P, onsets, bars, th) -> onsets；目前沒有任何步驟。"""
+    steps = []
+    for step in steps:
+        onsets = step(P, onsets, bars, th)
+    return onsets
+
+
+def build_score(P, source="hybrid", thresholds=None, mode="basic"):
+    if mode not in SCORE_MODES:
+        raise ValueError(f"未知的扒譜模式：{mode}（可用：{', '.join(SCORE_MODES)}）")
     th = {**THRESHOLDS, **(thresholds or {})}
     bj = json.loads((P / "beats.json").read_text())
     import soundfile as sf
@@ -473,6 +487,8 @@ def build_score(P, source="hybrid", thresholds=None):
     offset = grid_offset(all_onsets, times)
     all_onsets = [(t - offset, n, h) for t, n, h in all_onsets]
     onsets = [o for o in all_onsets if o[2] >= th[o[1]]]
+    if mode == "enhanced":
+        onsets = enhanced_steps(P, onsets, bars, th)
     onsets = detect_cross_stick(split_toms(onsets, P), P)
     grid, flat = quantize(onsets, bars)
     fill_from_context(grid, all_onsets, bars, th)
@@ -492,7 +508,7 @@ def build_score(P, source="hybrid", thresholds=None):
     while out_bars and not out_bars[0]["events"]:   # 開頭外插出來、沒有任何音的小節
         out_bars.pop(0)
     return {"bpm": round(bpm, 1), "meter": meter, "duration": duration, "offset_ms": round(offset * 1000, 1),
-            "bars": out_bars}
+            "bars": out_bars, "mode": mode}
 
 
 MULTIREST_MIN = 4   # 連續幾個空小節以上合併成多小節休止
@@ -634,6 +650,7 @@ def main():
     ap.add_argument("--codec", default=os.environ.get("DRUMCOVER_CODEC", "h264_nvenc"))
     ap.add_argument("--force", action="store_true", help="transcribe：已有的機率與拍點檔也重做")
     ap.add_argument("--no-simile", action="store_true", help="不使用 % 反覆記號，每小節都寫出來")
+    ap.add_argument("--mode", default="basic", choices=SCORE_MODES, help="扒譜模式：basic 基本（穩定）／enhanced 加強（新修正只加在這）")
     ap.add_argument("--source", default="hybrid", choices=["drums", "mix", "max", "hybrid"], help="ADTOF 機率來源")
     a = ap.parse_args()
     if a.projects_root:

@@ -40,7 +40,10 @@ def transcribe(P, opts, report, force=False):
 
 def score(P, opts, report):
     _step("score")
-    (P / "score.json").write_text((HERE / "next_score.json").read_text(encoding="utf-8"), encoding="utf-8")
+    (HERE / "score_opts.json").write_text(json.dumps(opts), encoding="utf-8")
+    data = json.loads((HERE / "next_score.json").read_text(encoding="utf-8"))
+    data["mode"] = opts.get("mode")
+    (P / "score.json").write_text(json.dumps(data), encoding="utf-8")
 '''
 
 
@@ -74,8 +77,12 @@ def versions(base):
     return call("GET", f"{base}/api/versions?p={NAME}")[1]
 
 
-def reimport(base):
-    return call("POST", f"{base}/api/projects/reimport?p={NAME}")
+def reimport(base, **body):
+    return call("POST", f"{base}/api/projects/reimport?p={NAME}", body or None)
+
+
+def score_opts(fake):
+    return json.loads((fake / "score_opts.json").read_text(encoding="utf-8"))
 
 
 def wait_state(base, state, timeout=15):
@@ -237,3 +244,36 @@ def test_重新扒譜執行中首頁清單標示扒譜中(srv, fake):
     wait_state(srv, "done")
     item = [p for p in call("GET", f"{srv}/api/project_list")[1] if p["name"] == "假歌"][0]
     assert item["status"] == "ready"
+
+
+def test_重新扒譜沒指定模式時用基本(srv, fake):
+    do_reimport(srv)
+    assert score_opts(fake)["mode"] == "basic"
+    assert versions(srv)[0]["mode"] == "basic"
+
+
+def test_重新扒譜帶模式_AI譜變加強_舊AI譜保留原模式(srv, fake):
+    assert reimport(srv, mode="enhanced")[0] == 200
+    wait_state(srv, "done")
+    assert score_opts(fake)["mode"] == "enhanced"
+    vs = versions(srv)
+    assert vs[0]["id"] == "ai" and vs[0]["mode"] == "enhanced"
+    assert [v["mode"] for v in vs if v["kind"] == "old_ai"] == ["basic"]
+
+
+def test_重新扒譜模式不合法被拒絕(srv, fake):
+    code, body = reimport(srv, mode="turbo")
+    assert code == 400 and "扒譜模式" in body["error"]
+    assert not (fake / "calls.log").exists()
+    assert old_ai(srv) == []
+
+
+def test_失敗的重新扒譜重試沿用當初的模式(srv, fake):
+    (fake / "fail").write_text("1")
+    assert reimport(srv, mode="enhanced")[0] == 200
+    wait_state(srv, "error")
+    (fake / "fail").unlink()
+    assert call("POST", f"{srv}/api/projects/retry?p={NAME}")[0] == 200
+    wait_state(srv, "done")
+    assert score_opts(fake)["mode"] == "enhanced"
+    assert versions(srv)[0]["mode"] == "enhanced"
