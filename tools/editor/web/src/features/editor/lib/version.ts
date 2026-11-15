@@ -1,3 +1,4 @@
+import { scoreModeName } from '@/lib/score-mode'
 import type { VersionInfo, VersionWarning } from '@/lib/types'
 
 /** AI 譜與舊 AI 譜唯讀（伺服器也會擋）。版本清單還沒載入時，只有 "ai" 確定唯讀。 */
@@ -10,8 +11,13 @@ export function isReadOnlyVersion(
 
 /** 版本選單上的名稱 */
 export function versionLabel(v: VersionInfo): string {
+  const tag = v.mode ? `${scoreModeName(v.mode)}・` : ''
   const base =
-    v.kind === 'ai' ? 'AI 譜（唯讀）' : v.kind === 'old_ai' ? `${v.name}（唯讀）` : v.name
+    v.kind === 'ai'
+      ? `AI 譜（${tag}唯讀）`
+      : v.kind === 'old_ai'
+        ? `${v.name}（${tag}唯讀）`
+        : v.name
   return `${base}${v.source_deleted ? '（來源已刪除）' : ''}${v.warning ? ' ⚠' : ''}`
 }
 

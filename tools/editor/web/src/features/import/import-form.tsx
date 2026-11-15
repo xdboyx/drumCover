@@ -15,7 +15,8 @@ import {
 } from '@/components/ui/select'
 import { JOB_KEY, JOB_KIND_LABEL, useJob } from '@/hooks/use-job'
 import * as api from '@/lib/api'
-import type { AudioSource } from '@/lib/types'
+import { SCORE_MODE_HINT, SCORE_MODE_OPTIONS } from '@/lib/score-mode'
+import type { AudioSource, ScoreMode } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { useProjectList } from '@/features/projects/use-project-list'
 import { sanitizeProjectName } from './lib/sanitize-name'
@@ -81,6 +82,7 @@ export function ImportForm() {
   const [start, setStart] = useState('')
   const [dur, setDur] = useState('')
   const [audio, setAudio] = useState(DEFAULT_AUDIO)
+  const [mode, setMode] = useState<ScoreMode>('basic')
   const [advOpen, setAdvOpen] = useState(false)
   const [fetching, setFetching] = useState(false)
   const [titleError, setTitleError] = useState('')
@@ -178,6 +180,7 @@ export function ImportForm() {
         start: Number(start) || 0,
         dur: Number(dur) || 0,
         audio: audio === DEFAULT_AUDIO ? null : (audio as AudioSource),
+        mode,
       })
       // 等工作狀態更新後，頁面會自動換成進度畫面
       await qc.refetchQueries({ queryKey: JOB_KEY })
@@ -379,6 +382,22 @@ export function ImportForm() {
                   </SelectContent>
                 </Select>
                 <Hint id="audio-hint">{audioHint}</Hint>
+              </div>
+              <div className="grid content-start gap-1.5 sm:col-span-2">
+                <Label htmlFor="mode">扒譜模式</Label>
+                <Select value={mode} onValueChange={(v) => setMode(v as ScoreMode)}>
+                  <SelectTrigger id="mode" className="w-full" aria-describedby="mode-hint">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SCORE_MODE_OPTIONS.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Hint id="mode-hint">{SCORE_MODE_HINT}</Hint>
               </div>
             </CollapsibleContent>
           </Collapsible>

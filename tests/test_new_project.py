@@ -51,7 +51,8 @@ def transcribe(P, opts, report):
 
 def score(P, opts, report):
     _step("score", P, report)
-    (P / "score.json").write_text(json.dumps(SCORE), encoding="utf-8")
+    (HERE / "score_opts.json").write_text(json.dumps(opts), encoding="utf-8")
+    (P / "score.json").write_text(json.dumps({**SCORE, "mode": opts.get("mode")}), encoding="utf-8")
 
 
 SCORE = %s
@@ -153,11 +154,50 @@ def test_進階選項會傳給扒譜流程(srv, fake):
     wait_state(srv, "done")
     got = json.loads((fake / "opts.json").read_text(encoding="utf-8"))
     assert got["source"] == URL
-    assert got["opts"] == {"start": 12.5, "dur": 30.0, "audio": "mix"}
+    assert got["opts"] == {"start": 12.5, "dur": 30.0, "audio": "mix", "mode": "basic"}
 
 
 def test_音源選項不合法被拒絕(srv):
     assert new(srv, "壞選項", audio="rm -rf")[0] == 400
+
+
+def score_opts(fake):
+    return json.loads((fake / "score_opts.json").read_text(encoding="utf-8"))
+
+
+def versions(base, name):
+    return call("GET", f"{base}/api/versions?p={urllib.parse.quote(name)}")[1]
+
+
+def test_沒指定扒譜模式時預設基本(srv, fake):
+    new(srv, "預設模式")
+    wait_state(srv, "done")
+    assert score_opts(fake)["mode"] == "basic"
+    assert versions(srv, "預設模式")[0]["mode"] == "basic"
+
+
+def test_扒譜模式會傳給排版步驟且版本清單看得到(srv, fake):
+    assert new(srv, "加強歌", mode="enhanced")[0] == 200
+    wait_state(srv, "done")
+    assert score_opts(fake)["mode"] == "enhanced"
+    ai = versions(srv, "加強歌")[0]
+    assert ai["id"] == "ai" and ai["mode"] == "enhanced"
+
+
+def test_扒譜模式不合法被拒絕且不留下資料夾(srv, projects_root):
+    code, body = new(srv, "壞模式", mode="turbo")
+    assert code == 400 and "扒譜模式" in body["error"]
+    assert not (projects_root / "壞模式").exists()
+
+
+def test_失敗重試沿用當初的扒譜模式(srv, fake):
+    (fake / "fail").write_text("score")
+    new(srv, "重試模式", mode="enhanced")
+    wait_state(srv, "error")
+    (fake / "fail").unlink()
+    assert call("POST", f"{srv}/api/projects/retry?p={urllib.parse.quote('重試模式')}")[0] == 200
+    wait_state(srv, "done")
+    assert score_opts(fake)["mode"] == "enhanced"
 
 
 def test_忙碌時不能再新增專案且不留下資料夾(srv, fake, projects_root):

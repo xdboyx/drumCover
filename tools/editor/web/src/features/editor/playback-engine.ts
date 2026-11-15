@@ -54,6 +54,13 @@ export class PlaybackEngine {
     return this.deps.video()
   }
 
+  /** 把音量偏好套到媒體元素與合成鼓聲（播放中拖動 slider 也走這裡，即時生效） */
+  applyVolume(): void {
+    const { srcVolume, synthVolume } = this.state()
+    for (const m of [this.deps.video(), this.deps.audio()]) if (m) m.volume = srcVolume
+    this.synth.setVolume(synthVolume)
+  }
+
   /** 從目前小節的起點（提前一拍或 0.05 秒）開始播放。已在播放就重新開始（改音源、速度時用）。 */
   async play(): Promise<void> {
     const video = this.deps.video()
@@ -63,6 +70,7 @@ export class PlaybackEngine {
     if (!video || !audio || !p || !bar) return
 
     await this.synth.resume()
+    this.applyVolume()
     this.synth.stopAll()
     for (const m of [video, audio]) if (m !== p) m.pause()
     p.playbackRate = rate

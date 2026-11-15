@@ -41,6 +41,9 @@ export interface Score {
   meta?: ScoreMeta
 }
 
+/** 扒譜模式：basic 是固定不變的原始方法，enhanced 套用實驗中的修正 */
+export type ScoreMode = 'basic' | 'enhanced'
+
 export type VersionKind = 'ai' | 'old_ai' | 'edited'
 
 export interface VersionWarning {
@@ -57,6 +60,8 @@ export interface VersionInfo {
   source: string | null
   created: string | null
   source_deleted: boolean
+  /** AI 譜與舊 AI 譜才有：扒這份譜用的模式 */
+  mode?: ScoreMode
   warning?: VersionWarning
 }
 
@@ -129,6 +134,7 @@ export interface NewProjectBody {
   start?: number
   dur?: number
   audio?: AudioSource | null
+  mode?: ScoreMode
 }
 
 export interface PreviewCursor {

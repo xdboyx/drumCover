@@ -9,6 +9,7 @@ import type {
   ProjectListItem,
   RenderBody,
   Score,
+  ScoreMode,
   ScoreResponse,
   VersionCreated,
   VersionInfo,
@@ -66,8 +67,8 @@ export const projectNew = (body: NewProjectBody) =>
   post<{ ok: true; name: string }>('/api/projects/new', body)
 export const projectRetry = (p: string) =>
   post<{ ok: true; name: string }>(`/api/projects/retry?p=${q(p)}`)
-export const projectReimport = (p: string) =>
-  post<{ ok: true; name: string }>(`/api/projects/reimport?p=${q(p)}`)
+export const projectReimport = (p: string, mode: ScoreMode) =>
+  post<{ ok: true; name: string }>(`/api/projects/reimport?p=${q(p)}`, { mode })
 
 // ---------------------------------------------------------------- 鼓譜與版本
 export const getScore = (p: string, v = 'ai') =>

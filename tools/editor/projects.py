@@ -12,6 +12,7 @@ from jobs import Busy
 from versions import DIFF_SEC, OLD_AI
 
 AUDIO_SOURCES = ("drums", "mix", "max", "hybrid")
+SCORE_MODES = ("basic", "enhanced")   # 扒譜模式：基本（固定不變）／加強（實驗中的修正）
 
 
 def check_name(name):
@@ -56,6 +57,14 @@ def clean_source(source):
     raise HttpError(400, "請輸入 YouTube 網址或本機 mp4 的完整路徑")
 
 
+def check_mode(mode):
+    """扒譜模式：沒提供視為 basic；不是 basic/enhanced 回 400。"""
+    mode = mode or "basic"
+    if mode not in SCORE_MODES:
+        raise HttpError(400, f"扒譜模式必須是 {'/'.join(SCORE_MODES)}")
+    return mode
+
+
 def import_steps(P, source, opts):
     """新增專案的扒譜步驟：下載 → 分離鼓聲 → 扒譜 → 排版。"""
     pl = pipeline()
@@ -82,9 +91,10 @@ def new_project(body):
     audio = body.get("audio") or None
     if audio is not None and audio not in AUDIO_SOURCES:
         raise HttpError(400, f"扒譜音源必須是 {'/'.join(AUDIO_SOURCES)}")
+    mode = check_mode(body.get("mode"))
     try:
         opts = {"start": max(0.0, float(body.get("start") or 0)), "dur": max(0.0, float(body.get("dur") or 0)),
-                "audio": audio}
+                "audio": audio, "mode": mode}
     except (TypeError, ValueError):
         raise HttpError(400, "開始秒數與長度必須是數字")
     P = settings.projects_root / name
@@ -188,10 +198,11 @@ class _LastReimport:
 last_reimport = _LastReimport()
 
 
-def reimport_project(name):
+def reimport_project(name, body):
     P = project(name)   # 沒有 AI 譜的專案（還沒扒完）不能重新扒譜
+    mode = check_mode(body.get("mode"))
     f = P / "import.json"
-    opts = json.loads(f.read_text(encoding="utf-8")).get("opts", {}) if f.exists() else {}
+    opts = {**(json.loads(f.read_text(encoding="utf-8")).get("opts", {}) if f.exists() else {}), "mode": mode}
     try:
         steps = reimport_steps(P, opts)
         runner.submit("reimport", P.name, steps)

@@ -27,6 +27,12 @@ describe('versionLabel', () => {
   it('標示唯讀、來源已刪除、對齊警告', () => {
     expect(versionLabel(v({ kind: 'ai', name: 'AI 譜' }))).toBe('AI 譜（唯讀）')
     expect(versionLabel(v({ kind: 'old_ai', name: '舊 AI 譜 1' }))).toBe('舊 AI 譜 1（唯讀）')
+    expect(versionLabel(v({ kind: 'ai', name: 'AI 譜', mode: 'enhanced' }))).toBe(
+      'AI 譜（加強・唯讀）'
+    )
+    expect(versionLabel(v({ kind: 'old_ai', name: '舊 AI 譜 1', mode: 'basic' }))).toBe(
+      '舊 AI 譜 1（基本・唯讀）'
+    )
     expect(versionLabel(v({ source_deleted: true }))).toBe('我的版本（來源已刪除）')
     expect(versionLabel(v({ warning: { old_ai: 'o', bars: [0], message: 'm' } }))).toBe(
       '我的版本 ⚠'

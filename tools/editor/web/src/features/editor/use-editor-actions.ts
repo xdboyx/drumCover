@@ -198,15 +198,10 @@ export function useEditorActions(
 
   async function reimport() {
     if (!(await confirmLeave())) return
-    const ok = await prompts.askConfirm({
-      title: '重新扒譜？',
-      description:
-        '重新扒譜會把目前的 AI 譜保存成唯讀的舊 AI 譜，你的編輯版本不會改變。確定要開始嗎？',
-      okLabel: '開始重新扒譜',
-    })
-    if (!ok) return
+    const mode = await prompts.askReimport(versionList()?.find((v) => v.id === 'ai')?.mode ?? 'basic')
+    if (!mode) return
     try {
-      await api.projectReimport(project)
+      await api.projectReimport(project, mode)
       refreshJob()
     } catch (e) {
       toast.error(`無法重新扒譜：${errMsg(e)}`)

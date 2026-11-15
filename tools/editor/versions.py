@@ -26,14 +26,23 @@ def read_version(P, vid):
     return json.loads(version_file(P, vid).read_text(encoding="utf-8"))
 
 
+def _mode_of(score):
+    """AI 譜的扒譜模式（score.json 最上層的 mode；舊檔沒有視為 basic）。"""
+    return score.get("mode") or "basic"
+
+
 def list_versions(P):
-    out = [{"id": AI, "name": AI_NAME, "kind": "ai", "source": None, "created": None}]
+    out = [{"id": AI, "name": AI_NAME, "kind": "ai", "source": None, "created": None,
+            "mode": _mode_of(json.loads((P / "score.json").read_text(encoding="utf-8")))}]
     metas, olds = [], []
     for f in (P / "versions").glob("*.json"):
-        m = json.loads(f.read_text(encoding="utf-8")).get("meta", {})
+        data = json.loads(f.read_text(encoding="utf-8"))
+        m = data.get("meta", {})
         kind = OLD_AI if m.get("kind") == OLD_AI else "edited"
         metas.append({"id": f.stem, "name": m.get("name", f.stem), "kind": kind,
                       "source": m.get("source"), "created": m.get("created")})
+        if kind == OLD_AI:
+            metas[-1]["mode"] = _mode_of(data)
         if kind == OLD_AI:
             olds.append((m.get("replaced_at") or "", f.stem, m.get("diff_bars") or []))
     out += sorted(metas, key=lambda v: (v["created"] or "", v["id"]))

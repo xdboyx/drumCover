@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { toast } from 'sonner'
 import { useEditorPrefs } from '@/stores/editor-prefs-store'
 import { barIndexAt } from './lib/bar'
+import { sameVolume } from './lib/volume'
 import { PlaybackEngine } from './playback-engine'
 import { useEditorStore } from './store'
 
@@ -22,6 +23,8 @@ export interface Playback {
   onVideoLoaded: () => void
   /** 使用者直接用影片控制列播放或拖曳時，讓「目前小節」跟著影片時間走 */
   onVideoTime: () => void
+  /** 使用者在影片控制列調音量：寫回 srcVolume，slider 跟著動 */
+  onVideoVolume: () => void
 }
 
 /** 試聽：把 PlaybackEngine 接到 React（元件卸載時停止、播放中改音源/速度/模式時重新開始）。 */
@@ -56,6 +59,12 @@ export function usePlayback(refs: PlaybackRefs): Playback {
     if (engine.playing) void engine.play()
   }, [engine, source, mode, rate])
 
+  const srcVolume = useEditorPrefs((s) => s.srcVolume)
+  const synthVolume = useEditorPrefs((s) => s.synthVolume)
+  useEffect(() => {
+    engine.applyVolume()
+  }, [engine, srcVolume, synthVolume])
+
   const play = useCallback(() => void engine.play(), [engine])
   const stop = useCallback(() => engine.stop(), [engine])
   const toggle = useCallback(() => (engine.playing ? engine.stop() : void engine.play()), [engine])
@@ -86,5 +95,12 @@ export function usePlayback(refs: PlaybackRefs): Playback {
     if (i !== s.cur) s.setCur(i)
   }, [engine])
 
-  return { play, stop, toggle, go, onVideoLoaded, onVideoTime }
+  const onVideoVolume = useCallback(() => {
+    const video = refsRef.current.video.current
+    if (!video) return
+    const prefs = useEditorPrefs.getState()
+    if (!sameVolume(video.volume, prefs.srcVolume)) prefs.setSrcVolume(video.volume)
+  }, [])
+
+  return { play, stop, toggle, go, onVideoLoaded, onVideoTime, onVideoVolume }
 }
