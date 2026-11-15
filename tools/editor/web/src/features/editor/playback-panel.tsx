@@ -2,12 +2,14 @@ import type { ReactNode } from 'react'
 import { Play, Repeat, Square } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
+import { Slider } from '@/components/ui/slider'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { mediaUrl } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useEditorPrefs } from '@/stores/editor-prefs-store'
 import { useEditor } from './context'
+import { percentToVolume, volumeToPercent } from './lib/volume'
 import { useEditorStore, type PlayMode, type PlaySource } from './store'
 
 /** 選完之後不要把焦點還給選單，否則 ←/→/空白/L 等快捷鍵會被選單吃掉 */
@@ -22,6 +24,37 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
+function VolumeField({
+  label,
+  value,
+  onChange,
+  disabled,
+}: {
+  label: string
+  value: number
+  onChange: (v: number) => void
+  disabled: boolean
+}) {
+  const percent = volumeToPercent(value)
+  return (
+    <div className={cn('grid gap-1.5', disabled && 'opacity-60')}>
+      <div className="flex items-center justify-between">
+        <Label className="text-muted-foreground text-xs">{label}音量</Label>
+        <span className="text-muted-foreground text-xs tabular-nums">{percent}%</span>
+      </div>
+      <Slider
+        min={0}
+        max={100}
+        step={1}
+        value={[percent]}
+        disabled={disabled}
+        aria-label={`${label}音量`}
+        onValueChange={([p]) => onChange(percentToVolume(p))}
+      />
+    </div>
+  )
+}
+
 /** 試聽與比對：影片（原生 controls）、播放控制、音源／速度／模式。 */
 export function PlaybackPanel() {
   const { project, playback, refs } = useEditor()
@@ -30,7 +63,8 @@ export function PlaybackPanel() {
   const loop = useEditorStore((s) => s.loop)
   const source = useEditorStore((s) => s.source)
   const mode = useEditorStore((s) => s.mode)
-  const { rate, setRate, preroll, setPreroll } = useEditorPrefs()
+  const { rate, setRate, preroll, setPreroll, srcVolume, setSrcVolume, synthVolume, setSynthVolume } =
+    useEditorPrefs()
   const hasVideo = media.includes('video.mp4')
   const hasDrums = media.includes('drums.wav')
 
@@ -46,6 +80,7 @@ export function PlaybackPanel() {
         onLoadedMetadata={playback.onVideoLoaded}
         onTimeUpdate={playback.onVideoTime}
         onSeeked={playback.onVideoTime}
+        onVolumeChange={playback.onVideoVolume}
         className="bg-black aspect-video w-full rounded-lg"
       />
       <audio ref={refs.audio} src={hasDrums ? mediaUrl(project, 'drums.wav') : undefined} preload="auto" />
@@ -110,6 +145,10 @@ export function PlaybackPanel() {
             提前一拍開始
           </Label>
         </div>
+      </div>
+      <div className="grid grid-cols-1 gap-2 min-[420px]:grid-cols-2">
+        <VolumeField label="音源" value={srcVolume} onChange={setSrcVolume} disabled={mode === 'synth'} />
+        <VolumeField label="鼓譜" value={synthVolume} onChange={setSynthVolume} disabled={mode === 'src'} />
       </div>
       <p className="text-muted-foreground text-xs">
         比對訣竅：選「音源 + 我寫的譜」慢速循環播放，合成鼓聲跟原曲對不上的地方就是要改的地方。

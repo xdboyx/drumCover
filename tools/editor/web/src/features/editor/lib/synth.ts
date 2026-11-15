@@ -11,12 +11,13 @@ export class DrumSynth {
   private master: GainNode | null = null
   private noise: AudioBuffer | null = null
   private scheduled: AudioScheduledSourceNode[] = []
+  private volume = 0.7
 
   private audio(): AudioContext {
     if (!this.ctx) {
       const ctx = new AudioContext()
       const master = ctx.createGain()
-      master.gain.value = 0.7
+      master.gain.value = this.volume
       master.connect(ctx.destination)
       const noise = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate)
       const d = noise.getChannelData(0)
@@ -36,6 +37,12 @@ export class DrumSynth {
   /** 建立（必要時）並啟動 AudioContext。 */
   async resume(): Promise<void> {
     await this.audio().resume()
+  }
+
+  /** 設定整體音量（0–1）；AudioContext 還沒建立時先記住，建立時套用。 */
+  setVolume(v: number): void {
+    this.volume = v
+    if (this.ctx && this.master) this.master.gain.setTargetAtTime(v, this.ctx.currentTime, 0.015)
   }
 
   /** 停止所有已排程的聲音。 */
